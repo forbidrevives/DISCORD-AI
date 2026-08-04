@@ -1,0 +1,9 @@
+discord.py
+flask
+groq
+pollinations.ai
+PyNaCl
+yt-dlp
+davey
+gradio_client
+aiosqlite
