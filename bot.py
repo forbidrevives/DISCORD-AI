@@ -80,27 +80,35 @@ chat_history = {}
 MAX_HISTORY = 6
 MAX_USERS_IN_MEMORY = 50 # Prevents Render from running out of RAM
 ADMIN_ID = 1457960499798081549  # 👑 PASTE YOUR DISCORD ID HERE
-# --- CLAN SYSTEM SETTINGS ---
-CLAN_MODE_ENABLED = True  # Change to False in the code to turn it all off
-clan_prefix = "мαƒια χ"
+# --- CLAN SYSTEM SETTINGS (OBSIDIAN PROTOCOL) ---
+CLAN_MODE_ENABLED = True 
 
 NORMAL_FONT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 AESTHETIC_FONT = "αв¢∂єƒgнιʝкℓмησρqяѕтυνωχуzαв¢∂єƒgнιʝкℓмησρqяѕтυνωχуz"
 FONT_MAP = str.maketrans(NORMAL_FONT, AESTHETIC_FONT)
 
-def make_mafia_name(member):
-    """Uses their pure global name, translates it, and adds the prefix."""
+def make_op_name(member):
+    """Translates the name and wraps it in Obsidian Protocol styling."""
     raw_name = member.global_name or member.name
+    lower_name = raw_name.lower()
     
-    if raw_name.startswith(clan_prefix):
-        raw_name = raw_name[len(clan_prefix):].strip()
-    elif raw_name.lower().startswith("mafia x"):
-        raw_name = raw_name[7:].strip()
+    # 🧹 Clean out old Mafia and OP tags if they already have them
+    if "мαƒια χ" in lower_name:
+        raw_name = raw_name.replace("мαƒια χ", "", 1).strip()
+    if "mafia x" in lower_name:
+        raw_name = lower_name.replace("mafia x", "", 1).strip()
+    if "σρ ⁝" in lower_name:
+        # Strips out existing OP tags so they don't stack infinitely
+        raw_name = raw_name.split("⁝")[-1].replace("™", "").replace("🔥", "").strip()
         
-    styled_name = raw_name.translate(FONT_MAP)
-    full_nick = f"{clan_prefix} {styled_name}"
+    # Translate to aesthetic font
+    styled_name = raw_name.translate(FONT_MAP).strip()
     
-    return " ".join(full_nick.split())[:32]
+    # Build the exact format: σρ ⁝ αℓєχ ™ 🔥
+    full_nick = f"σρ ⁝ {styled_name} ™ 🔥"
+    
+    # Discord hard-caps nicknames at 32 characters, so we slice it just in case
+    return full_nick[:32]
     
 def cleanup_memory():
     """Silently deletes old users if the RAM bank gets too full."""
@@ -290,6 +298,30 @@ async def smart_pfp_dropper():
                 # Clear the vault and reset the 30-minute timer
                 image_vault[target_channel_id] = []
                 next_drop_time[target_channel_id] = current_time
+
+# ==========================================
+# 🛡️ LOOP 7: THE DAILY OP CLAN ENFORCER
+# ==========================================
+@tasks.loop(hours=24)
+async def op_name_enforcer():
+    if not CLAN_MODE_ENABLED:
+        return
+        
+    print("🛡️ Running the Daily OP Clan Name Enforcer...")
+    for guild in discord_client.guilds:
+        async for member in guild.fetch_members(limit=None):
+            perfect_name = make_op_name(member)
+            
+            # Only send an API request if their name is actually wrong (Saves massive bandwidth)
+            if member.display_name != perfect_name:
+                try:
+                    await member.edit(nick=perfect_name)
+                except discord.Forbidden:
+                    pass # Skips the server owner (bots can't rename owners)
+                except Exception as e:
+                    pass
+    print("✅ Daily mass rename complete!")
+    
 # ==========================================
 # 🎮 LOOP 5: THE 2-HOUR GAMING NEWS & TIPS DROP
 # ==========================================
