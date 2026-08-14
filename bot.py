@@ -88,7 +88,7 @@ AESTHETIC_FONT = "αв¢∂єƒgнιʝкℓмησρqяѕтυνωχуzαв¢∂є
 FONT_MAP = str.maketrans(NORMAL_FONT, AESTHETIC_FONT)
 
 def make_op_name(member):
-    """Translates the name and wraps it in Obsidian Protocol styling."""
+    """Translates the name and wraps it in Obsidian Protocol styling (Minimalist)."""
     raw_name = member.global_name or member.name
     lower_name = raw_name.lower()
     
@@ -98,14 +98,14 @@ def make_op_name(member):
     if "mafia x" in lower_name:
         raw_name = lower_name.replace("mafia x", "", 1).strip()
     if "σρ ⁝" in lower_name:
-        # Strips out existing OP tags so they don't stack infinitely
+        # We still strip the fire emoji here to clean up anyone who already got it!
         raw_name = raw_name.split("⁝")[-1].replace("™", "").replace("🔥", "").strip()
         
     # Translate to aesthetic font
     styled_name = raw_name.translate(FONT_MAP).strip()
     
-    # Build the exact format: σρ ⁝ αℓєχ ™ 🔥
-    full_nick = f"σρ ⁝ {styled_name} ™ 🔥"
+    # 💎 Clean minimal format: σρ ⁝ αℓєχ ™
+    full_nick = f"σρ ⁝ {styled_name} ™"
     
     # Discord hard-caps nicknames at 32 characters, so we slice it just in case
     return full_nick[:32]
