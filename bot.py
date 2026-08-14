@@ -359,7 +359,8 @@ async def on_ready():
         print("🛡️ Clan Mode is True. Running one-time mass rename on boot...")
         for guild in discord_client.guilds:
             async for member in guild.fetch_members(limit=None):
-                perfect_name = make_mafia_name(member)
+                # 🔥 FIXED: Swapped to make_op_name
+                perfect_name = make_op_name(member) 
                 
                 if member.display_name != perfect_name:
                     try:
@@ -372,14 +373,16 @@ async def on_ready():
 
 
 
-
 @discord_client.event
 async def on_member_join(member):
     if CLAN_MODE_ENABLED:
         try:
-            await member.edit(nick=make_mafia_name(member))
+            # 🔥 FIXED: Swapped to make_op_name
+            await member.edit(nick=make_op_name(member))
         except Exception:
             pass
+            
+    # ... (Keep your normal welcome message code below this) ...
             
     # ... (Keep your normal welcome message code below this if you have one) ...
 
