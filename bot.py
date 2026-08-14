@@ -151,7 +151,7 @@ async def chat_wakeupper_loop():
                 
                 response = await ai_client.chat.completions.create(
                     messages=[{"role": "user", "content": prompt}],
-                    model="llama-3.1-8b-instant"
+                    model="openai/gpt-oss-20b"
                 )
                 chat_starter = response.choices[0].message.content.strip()
                 
@@ -365,7 +365,7 @@ async def on_member_join(member):
             async with channel.typing():
                 response = await ai_client.chat.completions.create(
                     messages=[{"role": "user", "content": prompt}],
-                    model="llama-3.1-8b-instant"
+                    model="openai/gpt-oss-20b"
                 )
                 ai_welcome = response.choices[0].message.content.strip()
                 
@@ -397,7 +397,7 @@ async def on_member_remove(member):
                 
                 response = await ai_client.chat.completions.create(
                     messages=[{"role": "user", "content": prompt}],
-                    model="llama-3.1-8b-instant"
+                    model="openai/gpt-oss-20b"
                 )
                 ai_goodbye = response.choices[0].message.content.strip()
                 
@@ -698,7 +698,7 @@ CRITICAL DIRECTIVE: If you aren't triggering one of the 5 specific visual/audio 
         # 4. Send the message to Groq (Using your fast 70b text model!)
         response = await ai_client.chat.completions.create(
             messages=chat_history[user_id],
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
         )
         
         bot_reply = response.choices[0].message.content
