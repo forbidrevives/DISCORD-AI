@@ -56,6 +56,8 @@ leave_configs = {}
 active_meme_loops = {}
 active_chat_loops = {}
 active_aesthetic_loops = {}
+active_male_pfp_loops = {}   # 🆕 Male PFP Loops
+active_female_pfp_loops = {} # 🆕 Female PFP Loops
 ai_active_channels = {}
 
 # Anti-Spam Trackers
@@ -63,6 +65,7 @@ user_strikes = {}
 user_recent_msgs = OrderedDict()  
 recent_memes = deque(maxlen=50)
 recent_greetings = deque(maxlen=20)
+recent_pfps = deque(maxlen=100) # 🆕 Prevents PFP repetition
 
 # ==========================================
 # 💾 ZERO-BANDWIDTH JSON SAVER
@@ -74,6 +77,8 @@ def save_configs():
         "meme": active_meme_loops,
         "chat": active_chat_loops,
         "aesthetic": active_aesthetic_loops,
+        "male_pfp": active_male_pfp_loops,
+        "female_pfp": active_female_pfp_loops,
         "ai_active": list(ai_active_channels.keys()),
         "toggles": GLOBAL_TOGGLES
     }
@@ -84,7 +89,7 @@ def save_configs():
         print(f"Save Config Error: {e}")
 
 def load_configs():
-    global welcome_configs, leave_configs, active_meme_loops, active_chat_loops, active_aesthetic_loops, ai_active_channels, GLOBAL_TOGGLES
+    global welcome_configs, leave_configs, active_meme_loops, active_chat_loops, active_aesthetic_loops, active_male_pfp_loops, active_female_pfp_loops, ai_active_channels, GLOBAL_TOGGLES
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
@@ -94,6 +99,8 @@ def load_configs():
                 active_meme_loops = {int(k): v for k, v in data.get("meme", {}).items()}
                 active_chat_loops = {int(k): v for k, v in data.get("chat", {}).items()}
                 active_aesthetic_loops = {int(k): v for k, v in data.get("aesthetic", {}).items()}
+                active_male_pfp_loops = {int(k): v for k, v in data.get("male_pfp", {}).items()}
+                active_female_pfp_loops = {int(k): v for k, v in data.get("female_pfp", {}).items()}
                 ai_active_channels = {int(k): True for k in data.get("ai_active", [])}
                 GLOBAL_TOGGLES.update(data.get("toggles", {}))
                 print("✅ Configurations loaded from JSON.")
@@ -271,6 +278,26 @@ async def fire_aesthetic_drop(cid, cfg):
     except Exception as e: print(f"Aesthetic drop: {e}")
 
 # ==========================================
+# 🆕 PFP DROPPER ENGINE (ZERO BANDWIDTH)
+# ==========================================
+async def fire_pfp_drop(cid, cfg, gender):
+    ch = discord_client.get_channel(cid)
+    if not ch: return
+    for _ in range(5): # Try up to 5 times to avoid duplicates
+        try:
+            # Using free, no-auth Avatar API
+            url = f"https://avatar.iran.liara.run/public/{gender}"
+            if url not in recent_pfps:
+                recent_pfps.append(url)
+                title = "🔥 Fresh Male PFP" if gender == "boy" else "🔥 Fresh Female PFP"
+                e = brand_embed(title=title, description="Steal this for your profile.")
+                e.set_image(url=url)
+                await ch.send(embed=e)
+                return
+        except Exception as e:
+            print(f"PFP drop error: {e}")
+
+# ==========================================
 # 🛠️ PUBLIC COMMANDS
 # ==========================================
 @tree.command(name="setup", description="Shows you how to setup the bot in your server.")
@@ -279,6 +306,7 @@ async def setup_cmd(interaction: discord.Interaction):
     e.add_field(name="1️⃣ Welcome & Leave", value="`/welcome enabled:True`\n`/leave enabled:True`", inline=False)
     e.add_field(name="2️⃣ Chat & Memes", value="`/chat-revive enabled:True`\n`/meme enabled:True minutes:30`", inline=False)
     e.add_field(name="3️⃣ AI Chat", value="Pings work everywhere. For auto-reply in a channel:\n`/ai-active enabled:True`", inline=False)
+    e.add_field(name="4️⃣ PFPs", value="`/male-pfp enabled:True`\n`/female-pfp enabled:True`", inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @tree.command(name="help", description="Show all commands.")
@@ -287,7 +315,8 @@ async def help_cmd(interaction: discord.Interaction):
     e = brand_embed(title="📖 COMMAND PANEL", description="🔒 *Admin only.*")
     e.add_field(name="🎉 Greetings", value="`/welcome enabled:`\n`/leave enabled:`", inline=True)
     e.add_field(name="🔁 Loops", value="`/chat-revive enabled:`\n`/meme enabled:`\n`/aesthetic enabled:`\n`/ai-active enabled:`", inline=True)
-    e.add_field(name="🛑 Stop", value="`/stop kind:`\n\n\n", inline=True)
+    e.add_field(name="🖼️ PFPs", value="`/male-pfp enabled:`\n`/female-pfp enabled:`", inline=True)
+    e.add_field(name="🛑 Stop", value="`/stop kind:`", inline=True)
     e.add_field(name="🌍 Global", value="`/ai-global`\n`/revert`", inline=True)
     e.add_field(name="🎛️ Tuning", value="`/cooldown seconds:`", inline=True)
     e.add_field(name="ℹ️ Info", value="`/status`\n`/help`", inline=True)
@@ -340,19 +369,16 @@ async def revert_cmd(interaction: discord.Interaction, confirm: bool):
     
     async def clear_nick(member):
         if member.bot: return 0
-        if member.nick: # If they have a server nickname
+        if member.nick:
             try:
-                await member.edit(nick=None) # Resets to global display name
-                await asyncio.sleep(0.3) # Minimum safe delay for Discord API
+                await member.edit(nick=None)
+                await asyncio.sleep(0.3)
                 return 1
-            except Exception:
-                return 0
+            except Exception: return 0
         return 0
 
-    # Run in parallel for speed, but with a safe rate limit
     results = await asyncio.gather(*(clear_nick(m) for m in interaction.guild.members))
     count = sum(results)
-                
     await interaction.followup.send(embed=ok_embed(f"✅ **Done!** Cleared nicknames for **{count}** members."), ephemeral=True)
 
 # ==========================================
@@ -394,7 +420,7 @@ async def chat_revive_cmd(interaction: discord.Interaction, enabled: bool, minut
     cfg = {"interval": minutes * 60, "last_drop": time.time(), "ping_mode": ping_mode}
     active_chat_loops[cid] = cfg; save_configs()
     mode_emoji = {"never": "🔕", "always": "📢", "random": "🎲"}[ping_mode]
-    await interaction.response.send_message(embed=ok_embed(f"Chat Reviver ON here (every {minutes}m, ping: {mode_emoji}).\n*🎭 Bot will react & welcome new joins here.*"), ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"Chat Reviver ON here (every {minutes}m, ping: {mode_emoji})."), ephemeral=True)
     asyncio.create_task(fire_chat_drop(cid, cfg))
 
 @tree.command(name="meme", description="Toggle meme dropper in THIS channel.")
@@ -421,6 +447,31 @@ async def aesthetic_cmd(interaction: discord.Interaction, enabled: bool, minutes
     await interaction.response.send_message(embed=ok_embed(f"Aesthetic ON here ('{query}', every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_aesthetic_drop(cid, cfg))
 
+# 🆕 MALE & FEMALE PFP COMMANDS
+@tree.command(name="male-pfp", description="Toggle automatic Male PFP drops in THIS channel.")
+@app_commands.checks.has_permissions(administrator=True)
+async def male_pfp_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 60):
+    cid = interaction.channel.id
+    if not enabled:
+        active_male_pfp_loops.pop(cid, None); save_configs()
+        await interaction.response.send_message(embed=ok_embed("Male PFP Dropper **OFF** here."), ephemeral=True); return
+    cfg = {"interval": minutes * 60, "last_drop": time.time()}
+    active_male_pfp_loops[cid] = cfg; save_configs()
+    await interaction.response.send_message(embed=ok_embed(f"Male PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
+    asyncio.create_task(fire_pfp_drop(cid, cfg, "boy"))
+
+@tree.command(name="female-pfp", description="Toggle automatic Female PFP drops in THIS channel.")
+@app_commands.checks.has_permissions(administrator=True)
+async def female_pfp_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 60):
+    cid = interaction.channel.id
+    if not enabled:
+        active_female_pfp_loops.pop(cid, None); save_configs()
+        await interaction.response.send_message(embed=ok_embed("Female PFP Dropper **OFF** here."), ephemeral=True); return
+    cfg = {"interval": minutes * 60, "last_drop": time.time()}
+    active_female_pfp_loops[cid] = cfg; save_configs()
+    await interaction.response.send_message(embed=ok_embed(f"Female PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
+    asyncio.create_task(fire_pfp_drop(cid, cfg, "girl"))
+
 @tree.command(name="ai-active", description="AI replies to EVERY message in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def ai_active_cmd(interaction: discord.Interaction, enabled: bool):
@@ -438,6 +489,8 @@ async def ai_active_cmd(interaction: discord.Interaction, enabled: bool):
     app_commands.Choice(name="chat-reviver", value="chat"),
     app_commands.Choice(name="meme-dropper", value="meme"),
     app_commands.Choice(name="aesthetic-dropper", value="aesthetic"),
+    app_commands.Choice(name="male-pfp", value="male_pfp"),
+    app_commands.Choice(name="female-pfp", value="female_pfp"),
     app_commands.Choice(name="ai-active", value="ai_active"),
     app_commands.Choice(name="welcome", value="welcome"),
     app_commands.Choice(name="leave", value="leave"),
@@ -449,6 +502,8 @@ async def stop_cmd(interaction: discord.Interaction, kind: app_commands.Choice[s
     if kind.value in ("chat", "all") and active_chat_loops.pop(cid, None): stopped.append("chat")
     if kind.value in ("meme", "all") and active_meme_loops.pop(cid, None): stopped.append("meme")
     if kind.value in ("aesthetic", "all") and active_aesthetic_loops.pop(cid, None): stopped.append("aesthetic")
+    if kind.value in ("male_pfp", "all") and active_male_pfp_loops.pop(cid, None): stopped.append("male-pfp")
+    if kind.value in ("female_pfp", "all") and active_female_pfp_loops.pop(cid, None): stopped.append("female-pfp")
     if kind.value in ("ai_active", "all") and cid in ai_active_channels:
         ai_active_channels.pop(cid); stopped.append("ai-active")
     if kind.value in ("welcome", "all") and welcome_configs.pop(cid, None): stopped.append("welcome")
@@ -476,7 +531,7 @@ async def status_cmd(interaction: discord.Interaction):
     e = brand_embed(title="⚙️ SYSTEM STATUS", description=f"**Bot is running in {len(discord_client.guilds)} servers.**")
     e.add_field(name="🌍 Toggles", value=f"🤖 AI Chat: {'✅' if GLOBAL_TOGGLES['ai_chat'] else '❌'}", inline=True)
     e.add_field(name="📊 Stats", value=f"⏱️ **{runtime_settings['cooldown']}s** cooldown\n🤖 **{runtime_settings['ai_limit']}/min** AI", inline=True)
-    e.add_field(name="🔁 Active in this Server", value=f"🗣️ **{len(active_chat_loops)}** chat • 😂 **{len(active_meme_loops)}** meme • 🖼️ **{len(active_aesthetic_loops)}** aesthetic", inline=False)
+    e.add_field(name="🔁 Active", value=f"🗣️ **{len(active_chat_loops)}** chat • 😂 **{len(active_meme_loops)}** meme • 🖼️ **{len(active_aesthetic_loops)}** aesthetic • 👤 **{len(active_male_pfp_loops) + len(active_female_pfp_loops)}** PFP", inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 # ==========================================
@@ -510,6 +565,14 @@ async def master_tickers():
         if now - cfg["last_drop"] >= cfg["interval"]:
             cfg["last_drop"] = now
             asyncio.create_task(fire_aesthetic_drop(cid, cfg))
+    for cid, cfg in list(active_male_pfp_loops.items()):
+        if now - cfg["last_drop"] >= cfg["interval"]:
+            cfg["last_drop"] = now
+            asyncio.create_task(fire_pfp_drop(cid, cfg, "boy"))
+    for cid, cfg in list(active_female_pfp_loops.items()):
+        if now - cfg["last_drop"] >= cfg["interval"]:
+            cfg["last_drop"] = now
+            asyncio.create_task(fire_pfp_drop(cid, cfg, "girl"))
 
 # ==========================================
 # 🚀 BOOT & DISPLAY NAME AUTO-SYNC
@@ -520,11 +583,9 @@ async def before_loops():
 
 @discord_client.event
 async def on_user_update(before, after):
-    # 🚨 AUTO-SYNC DISPLAY NAME 🚨
     if before.display_name != after.display_name:
         for guild in discord_client.guilds:
             member = guild.get_member(after.id)
-            # If they have a server nickname, reset it so their new global name shows
             if member and member.nick:
                 try:
                     await member.edit(nick=None)
@@ -547,9 +608,7 @@ async def on_ready():
 @discord_client.event
 async def on_member_join(member):
     await asyncio.sleep(3)
-    
     handled_channels = set()
-    
     for cid, cfg in list(welcome_configs.items()):
         ch = discord_client.get_channel(cid)
         if ch:
