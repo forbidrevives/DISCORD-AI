@@ -42,7 +42,8 @@ AI_CALL_WINDOW = 60
 GLOBAL_AI_LIMIT = 30
 
 runtime_settings = {"cooldown": 4, "ai_limit": 5}
-GLOBAL_TOGGLES = {"clan_mode": True, "ai_chat": True}
+# RENAMING SYSTEM IS COMPLETELY REMOVED
+GLOBAL_TOGGLES = {"ai_chat": True}
 
 chat_history = {}
 user_cooldowns = OrderedDict()
@@ -63,20 +64,6 @@ user_strikes = {}
 user_recent_msgs = OrderedDict()  
 recent_memes = deque(maxlen=50)
 recent_greetings = deque(maxlen=20)
-
-# OP Aesthetic Name Font
-NORMAL_FONT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-AESTHETIC_FONT = "αв¢∂єƒgнιʝкℓмησρqяѕтυνωχуzαв¢∂єƒgнιʝкℓмησρqяѕтυνωχуz"
-FONT_MAP = str.maketrans(NORMAL_FONT, AESTHETIC_FONT)
-
-def make_op_name(member):
-    raw_name = member.global_name or member.name
-    lower = raw_name.lower()
-    if "мαƒια χ" in lower: raw_name = raw_name.replace("мαƒια χ", "", 1).strip()
-    if "mafia x" in lower: raw_name = lower.replace("mafia x", "", 1).strip()
-    if "σρ ⁝" in lower: raw_name = raw_name.split("⁝")[-1].replace("™", "").replace("🔥", "").strip()
-    styled = raw_name.translate(FONT_MAP).strip() or "user"
-    return f"σρ ⁝ {styled} ™"[:32]
 
 # ==========================================
 # 💾 ZERO-BANDWIDTH JSON SAVER
@@ -302,7 +289,7 @@ async def help_cmd(interaction: discord.Interaction):
     e.add_field(name="🎉 Greetings", value="`/welcome enabled:`\n`/leave enabled:`", inline=True)
     e.add_field(name="🔁 Loops", value="`/chat-revive enabled:`\n`/meme enabled:`\n`/aesthetic enabled:`\n`/ai-active enabled:`", inline=True)
     e.add_field(name="🛑 Stop", value="`/stop kind:`\n\n\n", inline=True)
-    e.add_field(name="🌍 Global", value="`/clan-mode`\n`/ai-global`", inline=True)
+    e.add_field(name="🌍 Global", value="`/ai-global`\n`/revert`", inline=True)
     e.add_field(name="🎛️ Tuning", value="`/cooldown seconds:`", inline=True)
     e.add_field(name="ℹ️ Info", value="`/status`\n`/help`", inline=True)
     e.add_field(name="🛠️ Utilities", value="`/say text: [file:]`\n`/dm-all text: [file:]`", inline=False)
@@ -340,6 +327,32 @@ async def dm_all_cmd(interaction: discord.Interaction, text: str = None, file: d
         except discord.Forbidden: failed += 1
         except Exception as e: failed += 1; print(f"DM failed: {e}")
     await interaction.followup.send(embed=ok_embed(f"📨 **Broadcast Complete!**\n✅ Sent: {success}\n❌ Failed: {failed}"), ephemeral=True)
+
+# ==========================================
+# 🚨 MANUAL REVERT COMMAND
+# ==========================================
+@tree.command(name="revert", description="Remove aesthetic nicknames and reset to default Discord names.")
+@app_commands.checks.has_permissions(administrator=True)
+async def revert_cmd(interaction: discord.Interaction, confirm: bool):
+    if not confirm:
+        await interaction.response.send_message(embed=info_embed("Command cancelled. (Set `confirm` to True to run)."), ephemeral=True); return
+
+    await interaction.response.send_message(embed=info_embed("🔄 Scanning and reverting nicknames... (This takes a moment)"), ephemeral=True)
+    count = 0
+    for member in interaction.guild.members:
+        if member.bot: continue
+        # Check for old aesthetic tags
+        if member.nick and ("σρ ⁝" in member.nick or "™" in member.nick or "мαƒια χ" in member.nick):
+            try:
+                await member.edit(nick=None) # Resets to global name
+                count += 1
+                await asyncio.sleep(1.2) # Rate limit protection
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                print(f"Revert error for {member.name}: {e}")
+                
+    await interaction.followup.send(embed=ok_embed(f"✅ **Done!** Reverted **{count}** members back to their original global names."), ephemeral=True)
 
 # ==========================================
 # ⚙️ CHANNEL-SCOPED SETUPS
@@ -435,24 +448,13 @@ async def stop_cmd(interaction: discord.Interaction, kind: app_commands.Choice[s
     if kind.value in ("chat", "all") and active_chat_loops.pop(cid, None): stopped.append("chat")
     if kind.value in ("meme", "all") and active_meme_loops.pop(cid, None): stopped.append("meme")
     if kind.value in ("aesthetic", "all") and active_aesthetic_loops.pop(cid, None): stopped.append("aesthetic")
-    
-    # ✅ THE FIX APPLIED HERE
     if kind.value in ("ai_active", "all") and cid in ai_active_channels:
-        ai_active_channels.pop(cid)
-        stopped.append("ai-active")
-        
+        ai_active_channels.pop(cid); stopped.append("ai-active")
     if kind.value in ("welcome", "all") and welcome_configs.pop(cid, None): stopped.append("welcome")
     if kind.value in ("leave", "all") and leave_configs.pop(cid, None): stopped.append("leave")
-    
     save_configs()
     if stopped: await interaction.response.send_message(embed=ok_embed(f"Stopped: **{', '.join(stopped)}**"), ephemeral=True)
     else: await interaction.response.send_message(embed=info_embed(f"Nothing running here."), ephemeral=True)
-
-@tree.command(name="clan-mode", description="Toggle OP auto-rename globally.")
-@app_commands.checks.has_permissions(administrator=True)
-async def clan_mode_cmd(interaction: discord.Interaction, enabled: bool):
-    GLOBAL_TOGGLES["clan_mode"] = enabled; save_configs()
-    await interaction.response.send_message(embed=ok_embed(f"Clan Mode: **{'ON' if enabled else 'OFF'}**"), ephemeral=True)
 
 @tree.command(name="ai-global", description="Toggle AI chat replies globally.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -471,7 +473,7 @@ async def cooldown_cmd(interaction: discord.Interaction, seconds: int):
 @app_commands.checks.has_permissions(administrator=True)
 async def status_cmd(interaction: discord.Interaction):
     e = brand_embed(title="⚙️ SYSTEM STATUS", description=f"**Bot is running in {len(discord_client.guilds)} servers.**")
-    e.add_field(name="🌍 Toggles", value=f"{'✅' if GLOBAL_TOGGLES['clan_mode'] else '❌'} Clan\n{'✅' if GLOBAL_TOGGLES['ai_chat'] else '❌'} AI", inline=True)
+    e.add_field(name="🌍 Toggles", value=f"🤖 AI Chat: {'✅' if GLOBAL_TOGGLES['ai_chat'] else '❌'}", inline=True)
     e.add_field(name="📊 Stats", value=f"⏱️ **{runtime_settings['cooldown']}s** cooldown\n🤖 **{runtime_settings['ai_limit']}/min** AI", inline=True)
     e.add_field(name="🔁 Active in this Server", value=f"🗣️ **{len(active_chat_loops)}** chat • 😂 **{len(active_meme_loops)}** meme • 🖼️ **{len(active_aesthetic_loops)}** aesthetic", inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
@@ -508,23 +510,10 @@ async def master_tickers():
             cfg["last_drop"] = now
             asyncio.create_task(fire_aesthetic_drop(cid, cfg))
 
-@tasks.loop(hours=24)
-async def op_name_enforcer():
-    if not GLOBAL_TOGGLES["clan_mode"]: return
-    for guild in discord_client.guilds:
-        try:
-            async for member in guild.fetch_members(limit=None):
-                perfect = make_op_name(member)
-                if member.display_name != perfect:
-                    try: await member.edit(nick=perfect)
-                    except: pass
-        except: pass
-
 # ==========================================
 # 🚀 BOOT
 # ==========================================
 @master_tickers.before_loop
-@op_name_enforcer.before_loop
 async def before_loops():
     await discord_client.wait_until_ready()
 
@@ -536,29 +525,23 @@ async def on_ready():
         synced = await tree.sync()
         print(f"🌍 Synced {len(synced)} slash commands!")
     except Exception as e: print(f"Sync Error: {e}")
-    for loop in [master_tickers, op_name_enforcer]:
-        if not loop.is_running(): loop.start()
+    if not master_tickers.is_running(): master_tickers.start()
 
 # ==========================================
-# 👋 JOIN / LEAVE (NO MORE DOUBLE FIRE)
+# 👋 JOIN / LEAVE
 # ==========================================
 @discord_client.event
 async def on_member_join(member):
-    if GLOBAL_TOGGLES["clan_mode"]:
-        try: await member.edit(nick=make_op_name(member))
-        except: pass
     await asyncio.sleep(3)
     
     handled_channels = set()
     
-    # 1. Send Embed
     for cid, cfg in list(welcome_configs.items()):
         ch = discord_client.get_channel(cid)
         if ch:
             await send_greeting(ch, member, cfg, "welcome")
             handled_channels.add(cid)
 
-    # 2. Send AI Ping (Skip if already sent embed above)
     for cid, cfg in list(active_chat_loops.items()):
         if cid in handled_channels: continue 
         ch = discord_client.get_channel(cid)
@@ -579,7 +562,7 @@ async def on_member_remove(member):
         if ch: await send_greeting(ch, member, cfg, "leave")
 
 # ==========================================
-# 💬 MESSAGE HANDLER (Pure AI & Zero-Bloat)
+# 💬 MESSAGE HANDLER
 # ==========================================
 @discord_client.event
 async def on_message(message):
@@ -601,7 +584,6 @@ async def on_message(message):
             except: pass
         return
 
-    # 🎭 SMART CHAT REACTIONS
     if message.channel.id in active_chat_loops:
         if not (is_pinged or is_soft_pinged or message.channel.id in ai_active_channels):
             if random.random() < 0.25:
@@ -615,7 +597,6 @@ async def on_message(message):
     is_active_channel = message.channel.id in ai_active_channels
     if not (is_pinged or is_soft_pinged or is_active_channel): return
 
-    # Cooldowns & Rate Limits
     if user_id in user_cooldowns and (now - user_cooldowns[user_id] < runtime_settings["cooldown"]):
         last_warn = user_spam_warned.get(user_id, 0)
         if now - last_warn > 20:
@@ -638,7 +619,6 @@ async def on_message(message):
 
     if is_pinged: raw_content = raw_content.replace(f'<@{discord_client.user.id}>', '').strip()
 
-    # OCR
     image_url = next((att.url for att in message.attachments if att.content_type and att.content_type.startswith('image/')), None)
     if not raw_content.strip() and not image_url:
         await message.reply("Tag me with something!"); return
@@ -648,7 +628,6 @@ async def on_message(message):
         if not raw_content.strip(): raw_content = f"Read this image: '{text}'" if text else "What's in this image?"
         elif text: raw_content += f"\n\n[OCR: '{text}']"
 
-    # Context-Aware Prompting
     channel_name = message.channel.name.lower()
     context_instruction = "You are the Omni-Intelligent AI Core of the F0RB1D TZAR NETWORK."
     
