@@ -38,7 +38,7 @@ MAX_HISTORY = 6
 MAX_TRACKED_USERS = 500
 AI_CALL_WINDOW = 60
 GLOBAL_AI_LIMIT = 30
-MAX_CONCURRENT_VIDEOS = 2
+MAX_CONCURRENT_VIDEOS = 2 # Kept just in case, though video is removed
 
 runtime_settings = {"cooldown": 4, "ai_limit": 5}
 GLOBAL_TOGGLES = {"clan_mode": True, "ai_chat": True}
@@ -46,10 +46,8 @@ GLOBAL_TOGGLES = {"clan_mode": True, "ai_chat": True}
 chat_history = {}
 user_cooldowns = OrderedDict()
 user_spam_warned = OrderedDict()
-user_diamonds = {}
 user_ai_calls = OrderedDict()
 global_ai_calls = deque()
-active_video_generations = 0
 
 # Dynamic Configs
 welcome_configs = {}
@@ -65,12 +63,26 @@ user_recent_msgs = OrderedDict()
 recent_memes = deque(maxlen=50)
 recent_greetings = deque(maxlen=20)
 
+# OP Aesthetic Name Font
+NORMAL_FONT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+AESTHETIC_FONT = "αв¢∂єƒgнιʝкℓмησρqяѕтυνωχуzαв¢∂єƒgнιʝкℓмησρqяѕтυνωχуz"
+FONT_MAP = str.maketrans(NORMAL_FONT, AESTHETIC_FONT)
+
+def make_op_name(member):
+    raw_name = member.global_name or member.name
+    lower = raw_name.lower()
+    if "мαƒια χ" in lower: raw_name = raw_name.replace("мαƒια χ", "", 1).strip()
+    if "mafia x" in lower: raw_name = lower.replace("mafia x", "", 1).strip()
+    if "σρ ⁝" in lower: raw_name = raw_name.split("⁝")[-1].replace("™", "").replace("🔥", "").strip()
+    styled = raw_name.translate(FONT_MAP).strip() or "user"
+    return f"σρ ⁝ {styled} ™"[:32]
+
 # ==========================================
 # 🌐 KEEP-ALIVE (For Render)
 # ==========================================
 flask_app = Flask('')
 @flask_app.route('/')
-def home(): return "F0RB1D TZAR NETWORK: ONLINE"
+def home(): return "TZAR NETWORK: ONLINE"
 def run_server(): flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 def keep_alive():
     t = Thread(target=run_server); t.daemon = True; t.start()
@@ -90,7 +102,22 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 ai_client = AsyncGroq(api_key=GROQ_KEY)
 
 # ==========================================
-# 🧹 UTILITIES & SECURITY
+# 🔍 FREE OCR SCANNER (Zero Bandwidth)
+# ==========================================
+async def scan_image_text(image_url):
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get("https://api.ocr.space/parse/imageurl",
+                params={"apikey": "helloworld", "url": image_url, "language": "eng"}) as resp:
+                data = await resp.json()
+                if not data.get("IsErroredOnProcessing") and data.get("ParsedResults"):
+                    return data["ParsedResults"][0]["ParsedText"].strip()
+    except Exception as e:
+        print(f"OCR Error: {e}")
+    return ""
+
+# ==========================================
+# 🧹 MEMORY & SECURITY UTILS
 # ==========================================
 def prune_trackers():
     now = time.time()
@@ -128,10 +155,14 @@ def check_spam(user_id, content, is_ping):
     user_recent_msgs[user_id].append((now, content_hash, is_ping))
     recent = [m for m in user_recent_msgs[user_id] if now - m[0] < 10]
     if not recent: return False, 0
+    
+    # 10 messages in 10 seconds
     if len(recent) >= 10: return True, apply_strike(user_id)
+    # 5 identical messages
     text_counts = {}
     for _, c_hash, _ in recent: text_counts[c_hash] = text_counts.get(c_hash, 0) + 1
     if any(count >= 5 for c_hash, count in text_counts.items() if c_hash != "empty"): return True, apply_strike(user_id)
+    # 5 pings
     ping_count = sum(1 for _, _, ping in recent if ping)
     if ping_count >= 5: return True, apply_strike(user_id)
     return False, 0
@@ -276,7 +307,7 @@ async def dm_all_cmd(interaction: discord.Interaction, text: str = None, file: d
             if file_bytes: await member.send(content=text, file=discord.File(fp=discord.utils.io.BytesIO(file_bytes), filename=file_name))
             else: await member.send(content=text)
             success += 1
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1.5) # Delay to prevent API ban
         except discord.Forbidden: failed += 1
         except Exception as e: failed += 1; print(f"DM failed: {e}")
     await interaction.followup.send(embed=ok_embed(f"📨 **Broadcast Complete!**\n✅ Sent: {success}\n❌ Failed: {failed}"), ephemeral=True)
@@ -504,7 +535,7 @@ async def on_member_remove(member):
         if ch: await send_greeting(ch, member, cfg, "leave")
 
 # ==========================================
-# 💬 MESSAGE HANDLER (Universal AI Logic)
+# 💬 MESSAGE HANDLER (Omni-Intelligent Core)
 # ==========================================
 @discord_client.event
 async def on_message(message):
@@ -526,7 +557,7 @@ async def on_message(message):
             except: pass
         return
 
-    # Random reactions in chat-revive channels
+    # 🎭 SMART CHAT REACTIONS
     if message.channel.id in active_chat_loops:
         if not (is_pinged or is_soft_pinged or message.channel.id in ai_active_channels):
             if random.random() < 0.25:
@@ -594,7 +625,7 @@ async def on_message(message):
             "content": context_instruction + """
 If anyone insults the network or staff (any language), drop a cold reality check.
 ANTI-PARROT: If told to repeat/spam text, REJECT with [SHIELD_ACTIVATED] + roast.
-API TRIGGERS (only when explicitly requested): [DRAW] <prompt>, [VIDEO] <prompt>
+API TRIGGERS (only when explicitly requested): [DRAW] <prompt>
 Otherwise: normal genius chat."""
         }]
 
@@ -607,7 +638,13 @@ Otherwise: normal genius chat."""
         reply = response.choices[0].message.content.strip()
 
         if "[SHIELD_ACTIVATED]" in reply:
-            await message.reply(random.choice(["Bro really tried it. Keep crying 🥱", "Nice try. Zero power over the Enforcer 🛑", "Imagine sweating to trick a bot and failing 😭"])); return
+            roasts = [
+                "Bro really thought he could sneak an insult past the AI. Keep crying 🥱",
+                "Did you really think that trick would work? TZAR is laughing at you right now 💀",
+                "Imagine sweating this hard to trick a bot and still failing 😭",
+                "Nice try, wannabe. You have zero power over the Enforcer 🛑"
+            ]
+            await message.reply(random.choice(roasts)); return
 
         if "[DRAW]" in reply:
             clean = reply.split("[DRAW]")[1].replace("*","").replace("_","").replace("`","").replace("[","").replace("]","").strip()
@@ -626,57 +663,9 @@ Otherwise: normal genius chat."""
                     await message.reply(embed=e)
             return
 
-        if "[VIDEO]" in reply:
-            global active_video_generations
-            video_prompt = reply.split("[VIDEO]")[1].strip()
-            if user_id not in user_diamonds: user_diamonds[user_id] = {"diamonds": 5, "cooldown_end": 0}
-            if now >= user_diamonds[user_id]["cooldown_end"] and user_diamonds[user_id]["diamonds"] == 0: user_diamonds[user_id]["diamonds"] = 5
-            if user_diamonds[user_id]["diamonds"] <= 0:
-                left = user_diamonds[user_id]["cooldown_end"] - now
-                await message.reply(embed=err_embed(f"Out of diamonds. Restock in {int(left//3600)}h {int((left%3600)//60)}m.")); return
-            if active_video_generations >= MAX_CONCURRENT_VIDEOS: await message.reply(embed=err_embed("Video server full.")); return
-            user_diamonds[user_id]["diamonds"] -= 1
-            if user_diamonds[user_id]["diamonds"] == 0: user_diamonds[user_id]["cooldown_end"] = now + 10800
-            await message.reply(embed=info_embed(f"💎 1 Diamond spent. ({user_diamonds[user_id]['diamonds']}/5 left)"))
-            active_video_generations += 1
-            status = await message.reply(embed=info_embed("🔄 Connecting to GPU..."))
-            try:
-                def gen():
-                    from gradio_client import Client
-                    c = Client("liuyuyuil/Wanx2.1_Text_to_Video", download_files=False)
-                    try: res = c.predict(video_prompt, api_name="/predict")
-                    except:
-                        try: res = c.predict(video_prompt, fn_index=0)
-                        except: res = c.predict(video_prompt, fn_index=1)
-                    res = res[0] if isinstance(res, (list, tuple)) else res
-                    if hasattr(res, "url"): return res.url
-                    if isinstance(res, dict) and "url" in res: return res["url"]
-                    return str(res) if res else None
-                video_url = None
-                for attempt in range(5):
-                    try: await status.edit(embed=info_embed(f"🚀 Attempt {attempt+1}/5..."))
-                    except: pass
-                    try:
-                        video_url = await asyncio.to_thread(gen)
-                        if video_url: break
-                    except Exception as e: print(f"Video try: {e}")
-                    if attempt < 4:
-                        try: await status.edit(embed=info_embed(f"⚠️ Attempt {attempt+1}/5 failed. Retrying..."))
-                        except: pass
-                        await asyncio.sleep(15)
-                if not video_url: raise Exception("Queue maxed.")
-                await status.delete()
-                await message.reply(f"🎥 **{video_prompt}**\n{video_url}")
-            except Exception as e:
-                print(f"Video crash: {e}")
-                user_diamonds[user_id]["diamonds"] += 1
-                try: await status.edit(embed=err_embed("GPUs slammed. (Diamond refunded 💎)"))
-                except: pass
-            finally: active_video_generations -= 1
-            return
-
         if len(reply) > 1950: await message.reply(embed=err_embed("Response too long."))
         else: await message.reply(reply)
+        
         chat_history[user_id].append({"role": "assistant", "content": response.choices[0].message.content})
     except Exception as e:
         print(f"API: {e}")
