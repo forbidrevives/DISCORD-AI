@@ -12,6 +12,7 @@ import random
 import time
 import hashlib
 import json
+import re
 from collections import OrderedDict, deque
 
 # ==========================================
@@ -34,7 +35,7 @@ def err_embed(msg): return brand_embed(description=f"❌ {msg}", color=ERROR_COL
 def info_embed(msg): return brand_embed(description=f"ℹ️ {msg}")
 
 # ==========================================
-# 🛡️ GLOBAL STATE & MEMORY (ZERO BLOAT)
+# 🛡️ GLOBAL STATE & MEMORY
 # ==========================================
 MAX_HISTORY = 6
 MAX_TRACKED_USERS = 500
@@ -50,7 +51,7 @@ user_spam_warned = OrderedDict()
 user_ai_calls = OrderedDict()
 global_ai_calls = deque()
 
-# Dynamic Configs (Saved to JSON)
+# Dynamic Configs
 welcome_configs = {}
 leave_configs = {}
 active_meme_loops = {}
@@ -58,6 +59,7 @@ active_chat_loops = {}
 active_aesthetic_loops = {}
 active_male_pfp_loops = {}
 active_female_pfp_loops = {}
+active_banner_loops = {}
 ai_active_channels = {}
 
 # Anti-Spam & History Trackers
@@ -65,7 +67,7 @@ user_strikes = {}
 user_recent_msgs = OrderedDict()  
 recent_memes = deque(maxlen=50)
 recent_greetings = deque(maxlen=20)
-recent_pfps = deque(maxlen=150) # Stores 150 recent PFPs to prevent duplicates
+recent_media = deque(maxlen=200)
 
 # ==========================================
 # 💾 ZERO-BANDWIDTH JSON SAVER
@@ -75,17 +77,15 @@ def save_configs():
         "welcome": welcome_configs, "leave": leave_configs,
         "meme": active_meme_loops, "chat": active_chat_loops,
         "aesthetic": active_aesthetic_loops, "male_pfp": active_male_pfp_loops,
-        "female_pfp": active_female_pfp_loops, "ai_active": list(ai_active_channels.keys()),
-        "toggles": GLOBAL_TOGGLES
+        "female_pfp": active_female_pfp_loops, "banner": active_banner_loops,
+        "ai_active": list(ai_active_channels.keys()), "toggles": GLOBAL_TOGGLES
     }
     try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(data, f)
-    except Exception as e:
-        print(f"Save Config Error: {e}")
+        with open(CONFIG_FILE, "w") as f: json.dump(data, f)
+    except Exception as e: print(f"Save Config Error: {e}")
 
 def load_configs():
-    global welcome_configs, leave_configs, active_meme_loops, active_chat_loops, active_aesthetic_loops, active_male_pfp_loops, active_female_pfp_loops, ai_active_channels, GLOBAL_TOGGLES
+    global welcome_configs, leave_configs, active_meme_loops, active_chat_loops, active_aesthetic_loops, active_male_pfp_loops, active_female_pfp_loops, active_banner_loops, ai_active_channels, GLOBAL_TOGGLES
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
@@ -97,14 +97,14 @@ def load_configs():
                 active_aesthetic_loops = {int(k): v for k, v in data.get("aesthetic", {}).items()}
                 active_male_pfp_loops = {int(k): v for k, v in data.get("male_pfp", {}).items()}
                 active_female_pfp_loops = {int(k): v for k, v in data.get("female_pfp", {}).items()}
+                active_banner_loops = {int(k): v for k, v in data.get("banner", {}).items()}
                 ai_active_channels = {int(k): True for k in data.get("ai_active", [])}
                 GLOBAL_TOGGLES.update(data.get("toggles", {}))
                 print("✅ Configurations loaded from JSON.")
-        except Exception as e:
-            print(f"Load Config Error: {e}")
+        except Exception as e: print(f"Load Config Error: {e}")
 
 # ==========================================
-# 🌐 KEEP-ALIVE (For Render)
+# 🌐 KEEP-ALIVE
 # ==========================================
 flask_app = Flask('')
 @flask_app.route('/')
@@ -127,6 +127,9 @@ DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 ai_client = AsyncGroq(api_key=GROQ_KEY)
 
+# 🚨 Browser User-Agent for Scraping
+BROWSER_UA = os.getenv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
 # ==========================================
 # 🔍 FREE OCR SCANNER
 # ==========================================
@@ -138,8 +141,7 @@ async def scan_image_text(image_url):
                 data = await resp.json()
                 if not data.get("IsErroredOnProcessing") and data.get("ParsedResults"):
                     return data["ParsedResults"][0]["ParsedText"].strip()
-    except Exception as e:
-        print(f"OCR Error: {e}")
+    except Exception as e: print(f"OCR Error: {e}")
     return ""
 
 # ==========================================
@@ -253,8 +255,8 @@ async def fire_meme_drop(cid, cfg):
                 async with session.get('https://meme-api.com/gimme') as resp:
                     data = await resp.json()
                     url = data.get('url')
-                    if url and url not in recent_memes:
-                        recent_memes.append(url)
+                    if url and url not in recent_media:
+                        recent_media.append(url)
                         await ch.send(url)
                         return
         except Exception as e: print(f"Meme drop: {e}")
@@ -274,27 +276,67 @@ async def fire_aesthetic_drop(cid, cfg):
     except Exception as e: print(f"Aesthetic drop: {e}")
 
 # ==========================================
-# 🆕 100% RELIABLE PFP DROPPER ENGINE
+# 🆕 PREMIUM 4K PFP & MP4 BANNER ENGINES (NO API KEY)
 # ==========================================
 async def fire_pfp_drop(cid, cfg, gender):
     ch = discord_client.get_channel(cid)
     if not ch: return
-    for _ in range(5): # Try 5 times to get a unique image
+    
+    query = "male model portrait" if gender == "boy" else "female model portrait"
+    url = f"https://www.pexels.com/search/{query.replace(' ', '%20')}/"
+    
+    for attempt in range(3):
         try:
-            # RandomUser.me has 99 male and 99 female photos. 100% reliable, Discord caches them instantly.
-            num = random.randint(1, 99)
-            g = "men" if gender == "boy" else "women"
-            url = f"https://randomuser.me/api/portraits/{g}/{num}.jpg"
-            
-            if url not in recent_pfps:
-                recent_pfps.append(url)
-                title = "🔥 Fresh Male PFP" if gender == "boy" else "🔥 Fresh Female PFP"
-                e = brand_embed(title=title, description="Steal this for your profile.")
-                e.set_image(url=url)
-                await ch.send(embed=e)
-                return
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                headers = {"User-Agent": BROWSER_UA}
+                async with session.get(url, headers=headers) as resp:
+                    html = await resp.text()
+                    img_urls = re.findall(r'https://images\.pexels\.com/photos/\d+/pexels-photo-\d+\.jpeg', html)
+                    
+                    if img_urls:
+                        unique_urls = list(set(img_urls))
+                        selected_url = random.choice(unique_urls)
+                        
+                        if selected_url not in recent_media:
+                            recent_media.append(selected_url)
+                            title = "🔥 4K Male PFP" if gender == "boy" else "🔥 4K Female PFP"
+                            e = brand_embed(title=title, description="High-Res. Steal this.")
+                            e.set_image(url=selected_url)
+                            e.set_footer(text=f"📸 Pexels • {BRAND_FOOTER}")
+                            await ch.send(embed=e)
+                            return
         except Exception as e:
-            print(f"PFP drop error: {e}")
+            print(f"PFP Drop Error: {e}")
+            await asyncio.sleep(2)
+
+async def fire_banner_drop(cid, cfg):
+    ch = discord_client.get_channel(cid)
+    if not ch: return
+    
+    categories = ["abstract", "city", "nature", "technology"]
+    cat = random.choice(categories)
+    url = f"https://mixkit.co/free-stock-video/{cat}/"
+    
+    for attempt in range(3):
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                headers = {"User-Agent": BROWSER_UA}
+                async with session.get(url, headers=headers) as resp:
+                    html = await resp.text()
+                    mp4_links = re.findall(r'https://assets\.mixkit\.co/videos/\d+/\d+-720\.mp4', html)
+                    
+                    if mp4_links:
+                        unique_links = list(set(mp4_links))
+                        selected_mp4 = random.choice(unique_links)
+                        
+                        if selected_mp4 not in recent_media:
+                            recent_media.append(selected_mp4)
+                            e = brand_embed(title="🎬 Fresh Animated Banner", description="Use this MP4 for your profile.")
+                            await ch.send(selected_mp4) 
+                            return
+        except Exception as e:
+            print(f"Banner Drop Error: {e}")
+            await asyncio.sleep(2)
 
 # ==========================================
 # 🛠️ PUBLIC COMMANDS
@@ -305,7 +347,7 @@ async def setup_cmd(interaction: discord.Interaction):
     e.add_field(name="1️⃣ Welcome & Leave", value="`/welcome enabled:True`\n`/leave enabled:True`", inline=False)
     e.add_field(name="2️⃣ Chat & Memes", value="`/chat-revive enabled:True`\n`/meme enabled:True minutes:30`", inline=False)
     e.add_field(name="3️⃣ AI Chat", value="Pings work everywhere. For auto-reply in a channel:\n`/ai-active enabled:True`", inline=False)
-    e.add_field(name="4️⃣ PFPs", value="`/male-pfp enabled:True`\n`/female-pfp enabled:True`", inline=False)
+    e.add_field(name="4️⃣ Media Drops", value="`/male-pfp enabled:True`\n`/female-pfp enabled:True`\n`/banner enabled:True`", inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @tree.command(name="help", description="Show all commands.")
@@ -314,7 +356,7 @@ async def help_cmd(interaction: discord.Interaction):
     e = brand_embed(title="📖 COMMAND PANEL", description="🔒 *Admin only.*")
     e.add_field(name="🎉 Greetings", value="`/welcome enabled:`\n`/leave enabled:`", inline=True)
     e.add_field(name="🔁 Loops", value="`/chat-revive enabled:`\n`/meme enabled:`\n`/aesthetic enabled:`\n`/ai-active enabled:`", inline=True)
-    e.add_field(name="🖼️ PFPs", value="`/male-pfp enabled:`\n`/female-pfp enabled:`", inline=True)
+    e.add_field(name="🖼️ Media", value="`/male-pfp enabled:`\n`/female-pfp enabled:`\n`/banner enabled:`", inline=True)
     e.add_field(name="🛑 Stop", value="`/stop kind:`", inline=True)
     e.add_field(name="🌍 Global", value="`/ai-global`\n`/revert`", inline=True)
     e.add_field(name="🎛️ Tuning", value="`/cooldown seconds:`", inline=True)
@@ -446,8 +488,8 @@ async def aesthetic_cmd(interaction: discord.Interaction, enabled: bool, minutes
     await interaction.response.send_message(embed=ok_embed(f"Aesthetic ON here ('{query}', every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_aesthetic_drop(cid, cfg))
 
-# 🆕 MALE & FEMALE PFP COMMANDS
-@tree.command(name="male-pfp", description="Toggle automatic Male PFP drops in THIS channel.")
+# 🆕 PREMIUM MEDIA COMMANDS
+@tree.command(name="male-pfp", description="Toggle 4K Male PFP drops in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def male_pfp_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 60):
     cid = interaction.channel.id
@@ -456,10 +498,10 @@ async def male_pfp_cmd(interaction: discord.Interaction, enabled: bool, minutes:
         await interaction.response.send_message(embed=ok_embed("Male PFP Dropper **OFF** here."), ephemeral=True); return
     cfg = {"interval": minutes * 60, "last_drop": time.time()}
     active_male_pfp_loops[cid] = cfg; save_configs()
-    await interaction.response.send_message(embed=ok_embed(f"Male PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"4K Male PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_pfp_drop(cid, cfg, "boy"))
 
-@tree.command(name="female-pfp", description="Toggle automatic Female PFP drops in THIS channel.")
+@tree.command(name="female-pfp", description="Toggle 4K Female PFP drops in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def female_pfp_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 60):
     cid = interaction.channel.id
@@ -468,8 +510,20 @@ async def female_pfp_cmd(interaction: discord.Interaction, enabled: bool, minute
         await interaction.response.send_message(embed=ok_embed("Female PFP Dropper **OFF** here."), ephemeral=True); return
     cfg = {"interval": minutes * 60, "last_drop": time.time()}
     active_female_pfp_loops[cid] = cfg; save_configs()
-    await interaction.response.send_message(embed=ok_embed(f"Female PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"4K Female PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_pfp_drop(cid, cfg, "girl"))
+
+@tree.command(name="banner", description="Toggle MP4 Animated Banner drops in THIS channel.")
+@app_commands.checks.has_permissions(administrator=True)
+async def banner_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 120):
+    cid = interaction.channel.id
+    if not enabled:
+        active_banner_loops.pop(cid, None); save_configs()
+        await interaction.response.send_message(embed=ok_embed("Banner Dropper **OFF** here."), ephemeral=True); return
+    cfg = {"interval": minutes * 60, "last_drop": time.time()}
+    active_banner_loops[cid] = cfg; save_configs()
+    await interaction.response.send_message(embed=ok_embed(f"MP4 Banner Dropper ON here (every {minutes}m)."), ephemeral=True)
+    asyncio.create_task(fire_banner_drop(cid, cfg))
 
 @tree.command(name="ai-active", description="AI replies to EVERY message in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -490,6 +544,7 @@ async def ai_active_cmd(interaction: discord.Interaction, enabled: bool):
     app_commands.Choice(name="aesthetic-dropper", value="aesthetic"),
     app_commands.Choice(name="male-pfp", value="male_pfp"),
     app_commands.Choice(name="female-pfp", value="female_pfp"),
+    app_commands.Choice(name="banner", value="banner"),
     app_commands.Choice(name="ai-active", value="ai_active"),
     app_commands.Choice(name="welcome", value="welcome"),
     app_commands.Choice(name="leave", value="leave"),
@@ -503,6 +558,7 @@ async def stop_cmd(interaction: discord.Interaction, kind: app_commands.Choice[s
     if kind.value in ("aesthetic", "all") and active_aesthetic_loops.pop(cid, None): stopped.append("aesthetic")
     if kind.value in ("male_pfp", "all") and active_male_pfp_loops.pop(cid, None): stopped.append("male-pfp")
     if kind.value in ("female_pfp", "all") and active_female_pfp_loops.pop(cid, None): stopped.append("female-pfp")
+    if kind.value in ("banner", "all") and active_banner_loops.pop(cid, None): stopped.append("banner")
     if kind.value in ("ai_active", "all") and cid in ai_active_channels:
         ai_active_channels.pop(cid); stopped.append("ai-active")
     if kind.value in ("welcome", "all") and welcome_configs.pop(cid, None): stopped.append("welcome")
@@ -530,7 +586,7 @@ async def status_cmd(interaction: discord.Interaction):
     e = brand_embed(title="⚙️ SYSTEM STATUS", description=f"**Bot is running in {len(discord_client.guilds)} servers.**")
     e.add_field(name="🌍 Toggles", value=f"🤖 AI Chat: {'✅' if GLOBAL_TOGGLES['ai_chat'] else '❌'}", inline=True)
     e.add_field(name="📊 Stats", value=f"⏱️ **{runtime_settings['cooldown']}s** cooldown\n🤖 **{runtime_settings['ai_limit']}/min** AI", inline=True)
-    e.add_field(name="🔁 Active", value=f"🗣️ **{len(active_chat_loops)}** chat • 😂 **{len(active_meme_loops)}** meme • 🖼️ **{len(active_aesthetic_loops)}** aesthetic • 👤 **{len(active_male_pfp_loops) + len(active_female_pfp_loops)}** PFP", inline=False)
+    e.add_field(name="🔁 Active", value=f"🗣️ **{len(active_chat_loops)}** chat • 😂 **{len(active_meme_loops)}** meme\n🖼️ **{len(active_aesthetic_loops)}** aesthetic • 👤 **{len(active_male_pfp_loops) + len(active_female_pfp_loops)}** PFP • 🎬 **{len(active_banner_loops)}** banner", inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 # ==========================================
@@ -572,6 +628,10 @@ async def master_tickers():
         if now - cfg["last_drop"] >= cfg["interval"]:
             cfg["last_drop"] = now
             asyncio.create_task(fire_pfp_drop(cid, cfg, "girl"))
+    for cid, cfg in list(active_banner_loops.items()):
+        if now - cfg["last_drop"] >= cfg["interval"]:
+            cfg["last_drop"] = now
+            asyncio.create_task(fire_banner_drop(cid, cfg))
 
 # ==========================================
 # 🚀 BOOT & DISPLAY NAME AUTO-SYNC
