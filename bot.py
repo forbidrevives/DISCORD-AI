@@ -125,7 +125,7 @@ tree = app_commands.CommandTree(discord_client)
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
-GIPHY_KEY = "dc6zaTOxFJmzC" # 🆕 Public Beta Key (No limits for our use case)
+GIPHY_KEY = "dc6zaTOxFJmzC" 
 ai_client = AsyncGroq(api_key=GROQ_KEY)
 
 # ==========================================
@@ -274,13 +274,12 @@ async def fire_aesthetic_drop(cid, cfg):
     except Exception as e: print(f"Aesthetic drop: {e}")
 
 # ==========================================
-# 🆕 100% RELIABLE PFP ENGINE (RandomUser API)
+# 🆕 100% RELIABLE PFP ENGINE
 # ==========================================
 async def fire_pfp_drop(cid, cfg, gender):
     ch = discord_client.get_channel(cid)
     if not ch: return
     
-    # 99 high-quality portraits per gender. Reliable, instant, zero keys.
     for _ in range(5): 
         try:
             num = random.randint(1, 99)
@@ -289,24 +288,27 @@ async def fire_pfp_drop(cid, cfg, gender):
             
             if url not in recent_media:
                 recent_media.append(url)
-                title = "🔥 Rich Male PFP" if gender == "boy" else "🔥 Rich Female PFP"
-                e = brand_embed(title=title, description="High-Res. Steal this.")
+                
+                # Aesthetic bar format
+                custom_aesthetic_bar = f"`♠` `🖤` `♠` • [Download]({url}) • `♠` `🖤` `♠`"
+                
+                e = discord.Embed(color=0x2b2d31)
                 e.set_image(url=url)
-                e.set_footer(text=f"📸 RandomUser • {BRAND_FOOTER}")
-                await ch.send(embed=e)
+                e.set_footer(text=f"F0RB1D • {'Male' if gender == 'boy' else 'Female'} PFPs")
+                
+                await ch.send(content=custom_aesthetic_bar, embed=e)
                 return
         except Exception as e:
             print(f"PFP Drop Error: {e}")
 
 # ==========================================
-# 🆕 AUTO-PLAYING GIF BANNER ENGINE (Giphy API)
+# 🆕 AUTO-PLAYING GIF BANNER ENGINE (Old Format Restored)
 # ==========================================
 async def fire_banner_drop(cid, cfg):
     ch = discord_client.get_channel(cid)
     if not ch: return
     
-    # Uses the public Giphy beta key. No links shown, auto-plays in embed.
-    queries = ["aesthetic loop", "cyberpunk city", "neon abstract", "chill vibes"]
+    queries = ["aesthetic loop", "cyberpunk city", "neon abstract", "chill vibes", "dark aesthetic"]
     query = random.choice(queries)
     url = f"https://api.giphy.com/v1/gifs/search?api_key={GIPHY_KEY}&q={urllib.parse.quote(query)}&limit=20&rating=g"
     
@@ -323,10 +325,15 @@ async def fire_banner_drop(cid, cfg):
                             
                             if gif_url not in recent_media:
                                 recent_media.append(gif_url)
-                                e = brand_embed(title="🎬 Fresh Animated Banner", description="Auto-playing GIF. Steal this.")
-                                e.set_image(url=gif_url) # 🔥 THIS HIDES THE LINK AND AUTO-PLAYS IT
-                                e.set_footer(text=f"Giphy • {BRAND_FOOTER}")
-                                await ch.send(embed=e)
+                                
+                                # 🚨 RESTORED OLD AESTHETIC FORMAT 🚨
+                                custom_aesthetic_bar = f"`♠` `🖤` `♠` • [Download]({gif_url}) • `♠` `🖤` `♠`"
+                                
+                                e = discord.Embed(color=0x2b2d31)
+                                e.set_image(url=gif_url)
+                                e.set_footer(text="F0RB1D • Banners")
+                                
+                                await ch.send(content=custom_aesthetic_bar, embed=e)
                                 return
         except Exception as e:
             print(f"Banner Drop Error: {e}")
