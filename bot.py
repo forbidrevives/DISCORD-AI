@@ -12,7 +12,6 @@ import random
 import time
 import hashlib
 import json
-import re
 from collections import OrderedDict, deque
 
 # ==========================================
@@ -56,7 +55,7 @@ welcome_configs = {}
 leave_configs = {}
 active_meme_loops = {}
 active_chat_loops = {}
-active_aesthetic_loops = {}
+active_icon_loops = {}    # 🆕 Renamed from aesthetic
 active_male_pfp_loops = {}
 active_female_pfp_loops = {}
 active_banner_loops = {}
@@ -76,7 +75,7 @@ def save_configs():
     data = {
         "welcome": welcome_configs, "leave": leave_configs,
         "meme": active_meme_loops, "chat": active_chat_loops,
-        "aesthetic": active_aesthetic_loops, "male_pfp": active_male_pfp_loops,
+        "icons": active_icon_loops, "male_pfp": active_male_pfp_loops,
         "female_pfp": active_female_pfp_loops, "banner": active_banner_loops,
         "ai_active": list(ai_active_channels.keys()), "toggles": GLOBAL_TOGGLES
     }
@@ -85,7 +84,7 @@ def save_configs():
     except Exception as e: print(f"Save Config Error: {e}")
 
 def load_configs():
-    global welcome_configs, leave_configs, active_meme_loops, active_chat_loops, active_aesthetic_loops, active_male_pfp_loops, active_female_pfp_loops, active_banner_loops, ai_active_channels, GLOBAL_TOGGLES
+    global welcome_configs, leave_configs, active_meme_loops, active_chat_loops, active_icon_loops, active_male_pfp_loops, active_female_pfp_loops, active_banner_loops, ai_active_channels, GLOBAL_TOGGLES
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
@@ -94,7 +93,7 @@ def load_configs():
                 leave_configs = {int(k): v for k, v in data.get("leave", {}).items()}
                 active_meme_loops = {int(k): v for k, v in data.get("meme", {}).items()}
                 active_chat_loops = {int(k): v for k, v in data.get("chat", {}).items()}
-                active_aesthetic_loops = {int(k): v for k, v in data.get("aesthetic", {}).items()}
+                active_icon_loops = {int(k): v for k, v in data.get("icons", {}).items()}
                 active_male_pfp_loops = {int(k): v for k, v in data.get("male_pfp", {}).items()}
                 active_female_pfp_loops = {int(k): v for k, v in data.get("female_pfp", {}).items()}
                 active_banner_loops = {int(k): v for k, v in data.get("banner", {}).items()}
@@ -258,7 +257,7 @@ async def fire_meme_drop(cid, cfg):
                         return
         except Exception as e: print(f"Meme drop: {e}")
 
-async def fire_aesthetic_drop(cid, cfg):
+async def fire_icon_drop(cid, cfg):
     ch = discord_client.get_channel(cid)
     if not ch: return
     try:
@@ -266,14 +265,14 @@ async def fire_aesthetic_drop(cid, cfg):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
             async with session.get("https://api.unsplash.com/photos/random", params=params) as resp:
                 data = await resp.json()
-                e = brand_embed(title="🔥 Fresh Drop", description="Steal this for your profile.")
+                e = brand_embed(title="🔥 Fresh Icon", description="Steal this for your profile.")
                 e.set_image(url=data["urls"]["regular"])
                 e.set_footer(text=f"📸 {data['user']['name']} • {BRAND_FOOTER}")
                 await ch.send(embed=e)
-    except Exception as e: print(f"Aesthetic drop: {e}")
+    except Exception as e: print(f"Icon drop: {e}")
 
 # ==========================================
-# 🆕 TRUE 4K PFP ENGINE (Using Unsplash)
+# 🆕 4K PFP ENGINE (Unsplash)
 # ==========================================
 async def fire_pfp_drop(cid, cfg, gender):
     ch = discord_client.get_channel(cid)
@@ -288,19 +287,14 @@ async def fire_pfp_drop(cid, cfg, gender):
                 async with session.get("https://api.unsplash.com/photos/random", params=params) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        # 🌟 'full' returns the 4K raw image resolution
                         img_url = data["urls"]["full"] 
                         
                         if img_url not in recent_media:
                             recent_media.append(img_url)
-                            
-                            # Aesthetic bar format
                             custom_aesthetic_bar = f"`♠` `🖤` `♠` • [Download]({img_url}) • `♠` `🖤` `♠`"
-                            
                             e = discord.Embed(color=0x2b2d31)
                             e.set_image(url=img_url)
                             e.set_footer(text=f"F0RB1D • {'Male' if gender == 'boy' else 'Female'} PFPs")
-                            
                             await ch.send(content=custom_aesthetic_bar, embed=e)
                             return
         except Exception as e:
@@ -308,45 +302,54 @@ async def fire_pfp_drop(cid, cfg, gender):
             await asyncio.sleep(2)
 
 # ==========================================
-# 🆕 AUTO-PLAYING GIF BANNER ENGINE (Tenor API)
+# 🆕 BULLETPROOF BANNER ENGINE (Fail-Safe to 4K Image)
 # ==========================================
 async def fire_banner_drop(cid, cfg):
     ch = discord_client.get_channel(cid)
     if not ch: return
     
+    # 1. Try Tenor API (Newer endpoint)
     queries = ["aesthetic loop", "cyberpunk city", "neon abstract", "dark aesthetic"]
     query = random.choice(queries)
+    url = f"https://tenor.googleapis.com/v2/search?q={urllib.parse.quote(query)}&key=LIVDSRZULELA&limit=10"
     
-    # Using Tenor API (Google's reliable GIF platform)
-    url = f"https://g.tenor.com/v1/search?q={urllib.parse.quote(query)}&key=LIVDSRZULELA&limit=20&media_filter=minimal"
-    
-    for _ in range(3):
+    gif_url = None
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    results = data.get("results", [])
+                    if results:
+                        gif = random.choice(results)
+                        gif_url = gif["media_formats"]["gif"]["url"]
+    except Exception as e:
+        print(f"Tenor API Failed: {e}")
+        
+    # 2. Fail-Safe: If Tenor fails or is blocked by Render, fallback to Unsplash 4K Landscape
+    if not gif_url:
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(url) as resp:
+            params = {"client_id": UNSPLASH_ACCESS_KEY, "query": "aesthetic landscape", "orientation": "landscape"}
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                async with session.get("https://api.unsplash.com/photos/random", params=params) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        results = data.get("results", [])
-                        if results:
-                            gif = random.choice(results)
-                            # 🌟 Direct GIF URL. Discord auto-plays this inside the embed.
-                            gif_url = gif["media"][0]["gif"]["url"] 
-                            
-                            if gif_url not in recent_media:
-                                recent_media.append(gif_url)
-                                
-                                # 🚨 RESTORED OLD AESTHETIC FORMAT 🚨
-                                custom_aesthetic_bar = f"`♠` `🖤` `♠` • [Download]({gif_url}) • `♠` `🖤` `♠`"
-                                
-                                e = discord.Embed(color=0x2b2d31)
-                                e.set_image(url=gif_url)
-                                e.set_footer(text="F0RB1D • Banners")
-                                
-                                await ch.send(content=custom_aesthetic_bar, embed=e)
-                                return
+                        gif_url = data["urls"]["full"]
         except Exception as e:
-            print(f"Banner Drop Error: {e}")
-            await asyncio.sleep(2)
+            print(f"Unsplash Fallback Failed: {e}")
+            return
+
+    # 3. Send the image/GIF
+    if gif_url and gif_url not in recent_media:
+        recent_media.append(gif_url)
+        
+        # 🚨 EXACT OLD AESTHETIC FORMAT 🚨
+        custom_aesthetic_bar = f"`♠` `🖤` `♠` • [Download]({gif_url}) • `♠` `🖤` `♠`"
+        e = discord.Embed(color=0x2b2d31)
+        e.set_image(url=gif_url)
+        e.set_footer(text="F0RB1D • Banners")
+        
+        await ch.send(content=custom_aesthetic_bar, embed=e)
 
 # ==========================================
 # 🛠️ PUBLIC COMMANDS
@@ -365,7 +368,7 @@ async def setup_cmd(interaction: discord.Interaction):
 async def help_cmd(interaction: discord.Interaction):
     e = brand_embed(title="📖 COMMAND PANEL", description="🔒 *Admin only.*")
     e.add_field(name="🎉 Greetings", value="`/welcome enabled:`\n`/leave enabled:`", inline=True)
-    e.add_field(name="🔁 Loops", value="`/chat-revive enabled:`\n`/meme enabled:`\n`/aesthetic enabled:`\n`/ai-active enabled:`", inline=True)
+    e.add_field(name="🔁 Loops", value="`/chat-revive enabled:`\n`/meme enabled:`\n`/icons enabled:`\n`/ai-active enabled:`", inline=True)
     e.add_field(name="🖼️ Media", value="`/male-pfp enabled:`\n`/female-pfp enabled:`\n`/banner enabled:`", inline=True)
     e.add_field(name="🛑 Stop", value="`/stop kind:`", inline=True)
     e.add_field(name="🌍 Global", value="`/ai-global`\n`/revert`", inline=True)
@@ -486,17 +489,18 @@ async def meme_cmd(interaction: discord.Interaction, enabled: bool, minutes: int
     await interaction.response.send_message(embed=ok_embed(f"Meme Dropper ON here (every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_meme_drop(cid, cfg))
 
-@tree.command(name="aesthetic", description="Toggle Unsplash image dropper in THIS channel.")
+# 🆕 RENAMED TO /icons
+@tree.command(name="icons", description="Toggle Unsplash image dropper in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
-async def aesthetic_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 180, query: str = "aesthetic", landscape: bool = False):
+async def icon_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 180, query: str = "icon aesthetic", landscape: bool = False):
     cid = interaction.channel.id
     if not enabled:
-        active_aesthetic_loops.pop(cid, None); save_configs()
-        await interaction.response.send_message(embed=ok_embed("Aesthetic **OFF** here."), ephemeral=True); return
+        active_icon_loops.pop(cid, None); save_configs()
+        await interaction.response.send_message(embed=ok_embed("Icons **OFF** here."), ephemeral=True); return
     cfg = {"interval": minutes * 60, "last_drop": time.time(), "query": query, "landscape": landscape}
-    active_aesthetic_loops[cid] = cfg; save_configs()
-    await interaction.response.send_message(embed=ok_embed(f"Aesthetic ON here ('{query}', every {minutes}m)."), ephemeral=True)
-    asyncio.create_task(fire_aesthetic_drop(cid, cfg))
+    active_icon_loops[cid] = cfg; save_configs()
+    await interaction.response.send_message(embed=ok_embed(f"Icons ON here ('{query}', every {minutes}m)."), ephemeral=True)
+    asyncio.create_task(fire_icon_drop(cid, cfg))
 
 # 🆕 PREMIUM MEDIA COMMANDS
 @tree.command(name="male-pfp", description="Toggle 4K Male PFP drops in THIS channel.")
@@ -551,7 +555,7 @@ async def ai_active_cmd(interaction: discord.Interaction, enabled: bool):
 @app_commands.choices(kind=[
     app_commands.Choice(name="chat-reviver", value="chat"),
     app_commands.Choice(name="meme-dropper", value="meme"),
-    app_commands.Choice(name="aesthetic-dropper", value="aesthetic"),
+    app_commands.Choice(name="icons", value="icons"),
     app_commands.Choice(name="male-pfp", value="male_pfp"),
     app_commands.Choice(name="female-pfp", value="female_pfp"),
     app_commands.Choice(name="banner", value="banner"),
@@ -565,7 +569,7 @@ async def stop_cmd(interaction: discord.Interaction, kind: app_commands.Choice[s
     stopped = []
     if kind.value in ("chat", "all") and active_chat_loops.pop(cid, None): stopped.append("chat")
     if kind.value in ("meme", "all") and active_meme_loops.pop(cid, None): stopped.append("meme")
-    if kind.value in ("aesthetic", "all") and active_aesthetic_loops.pop(cid, None): stopped.append("aesthetic")
+    if kind.value in ("icons", "all") and active_icon_loops.pop(cid, None): stopped.append("icons")
     if kind.value in ("male_pfp", "all") and active_male_pfp_loops.pop(cid, None): stopped.append("male-pfp")
     if kind.value in ("female_pfp", "all") and active_female_pfp_loops.pop(cid, None): stopped.append("female-pfp")
     if kind.value in ("banner", "all") and active_banner_loops.pop(cid, None): stopped.append("banner")
@@ -596,7 +600,7 @@ async def status_cmd(interaction: discord.Interaction):
     e = brand_embed(title="⚙️ SYSTEM STATUS", description=f"**Bot is running in {len(discord_client.guilds)} servers.**")
     e.add_field(name="🌍 Toggles", value=f"🤖 AI Chat: {'✅' if GLOBAL_TOGGLES['ai_chat'] else '❌'}", inline=True)
     e.add_field(name="📊 Stats", value=f"⏱️ **{runtime_settings['cooldown']}s** cooldown\n🤖 **{runtime_settings['ai_limit']}/min** AI", inline=True)
-    e.add_field(name="🔁 Active", value=f"🗣️ **{len(active_chat_loops)}** chat • 😂 **{len(active_meme_loops)}** meme\n🖼️ **{len(active_aesthetic_loops)}** aesthetic • 👤 **{len(active_male_pfp_loops) + len(active_female_pfp_loops)}** PFP • 🎬 **{len(active_banner_loops)}** banner", inline=False)
+    e.add_field(name="🔁 Active", value=f"🗣️ **{len(active_chat_loops)}** chat • 😂 **{len(active_meme_loops)}** meme\n🖼️ **{len(active_icon_loops)}** icons • 👤 **{len(active_male_pfp_loops) + len(active_female_pfp_loops)}** PFP • 🎬 **{len(active_banner_loops)}** banner", inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 # ==========================================
@@ -626,10 +630,10 @@ async def master_tickers():
         if now - cfg["last_drop"] >= cfg["interval"]:
             cfg["last_drop"] = now
             asyncio.create_task(fire_meme_drop(cid, cfg))
-    for cid, cfg in list(active_aesthetic_loops.items()):
+    for cid, cfg in list(active_icon_loops.items()):
         if now - cfg["last_drop"] >= cfg["interval"]:
             cfg["last_drop"] = now
-            asyncio.create_task(fire_aesthetic_drop(cid, cfg))
+            asyncio.create_task(fire_icon_drop(cid, cfg))
     for cid, cfg in list(active_male_pfp_loops.items()):
         if now - cfg["last_drop"] >= cfg["interval"]:
             cfg["last_drop"] = now
