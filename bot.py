@@ -15,12 +15,12 @@ import hashlib
 from collections import OrderedDict, deque
 
 # ==========================================
-# 🎨 BRANDING
+# 🎨 TZAR ™ BRANDING
 # ==========================================
 BRAND_COLOR = 0x2b2d31
 SUCCESS_COLOR = 0x2ecc71
 ERROR_COLOR = 0xe74c3c
-BRAND_FOOTER = "F0RB1D • OBSIDIAN PROTOCOL"
+BRAND_FOOTER = "F0RB1D • TZAR ™"
 
 def brand_embed(title=None, description=None, color=BRAND_COLOR):
     e = discord.Embed(title=title, description=description, color=color)
@@ -88,7 +88,7 @@ recent_greetings = deque(maxlen=20)
 # ==========================================
 flask_app = Flask('')
 @flask_app.route('/')
-def home(): return "OBSIDIAN PROTOCOL: FORTRESS"
+def home(): return "TZAR PROTOCOL: FORTRESS"
 def run_server(): flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 def keep_alive():
     t = Thread(target=run_server); t.daemon = True; t.start()
@@ -152,7 +152,7 @@ def music_allowed(user_id):
     return True, ""
 
 # ==========================================
-# 🚨 ADVANCED ANTI-SPAM (With Visible Warning)
+# 🚨 ADVANCED ANTI-SPAM (10 msg/10s)
 # ==========================================
 def apply_strike(user_id):
     now = time.time()
@@ -175,20 +175,26 @@ def check_spam(user_id, content, is_ping):
     if user_id in user_strikes and now < user_strikes[user_id]["timeout_until"]:
         return True, int(user_strikes[user_id]["timeout_until"] - now)
         
-    if user_id not in user_recent_msgs: user_recent_msgs[user_id] = deque(maxlen=5)
+    if user_id not in user_recent_msgs: user_recent_msgs[user_id] = deque(maxlen=15)
     content_hash = hashlib.md5(content.encode()).hexdigest() if content else "empty"
     user_recent_msgs[user_id].append((now, content_hash, is_ping))
     
     recent = [m for m in user_recent_msgs[user_id] if now - m[0] < 10]
     if not recent: return False, 0
     
+    # 1. Rate Limit (10 messages in 10s)
+    if len(recent) >= 10:
+        t = apply_strike(user_id); return True, t
+
+    # 2. Identical text spam (5 times in 10s)
     text_counts = {}
     for _, c_hash, _ in recent: text_counts[c_hash] = text_counts.get(c_hash, 0) + 1
-    if any(count >= 3 for c_hash, count in text_counts.items() if c_hash != "empty"):
+    if any(count >= 5 for c_hash, count in text_counts.items() if c_hash != "empty"):
         t = apply_strike(user_id); return True, t
         
+    # 3. Ping spam (5 pings in 10s)
     ping_count = sum(1 for _, _, ping in recent if ping)
-    if ping_count >= 3:
+    if ping_count >= 5:
         t = apply_strike(user_id); return True, t
     return False, 0
 
@@ -211,11 +217,10 @@ async def build_greeting(member, cfg, kind="welcome"):
                 msg = prefix + response.choices[0].message.content.strip()
             except: msg = prefix + ("Welcome!" if kind == "welcome" else "Peace out.")
 
-        # Check for duplicates
         if msg not in recent_greetings:
             recent_greetings.append(msg)
             return msg
-    return msg # Fallback if 3 attempts all match somehow
+    return msg
 
 async def send_greeting(ch, member, cfg, kind="welcome"):
     try:
@@ -226,12 +231,9 @@ async def send_greeting(ch, member, cfg, kind="welcome"):
         verb = "just joined!" if kind == "welcome" else "just left"
         e.set_author(name=f"{member.name} {verb}", icon_url=member.display_avatar.url)
         
-        if kind == "welcome":
-            e.set_thumbnail(url=member.display_avatar.url)
-            
+        if kind == "welcome": e.set_thumbnail(url=member.display_avatar.url)
         if cfg.get("gif_url"): e.set_image(url=cfg["gif_url"])
         
-        # Pro Fields
         created_at = int(member.created_at.timestamp())
         e.add_field(name="📅 Account Created", value=f"<t:{created_at}:R>", inline=True)
         e.add_field(name="👥 Member Count", value=f"#{member.guild.member_count:,}", inline=True)
@@ -242,7 +244,7 @@ async def send_greeting(ch, member, cfg, kind="welcome"):
     except Exception as e: print(f"{kind} send: {e}")
 
 # ==========================================
-# 🔥 BACKGROUND FIRE FUNCTIONS (Anti-Repetition)
+# 🔥 BACKGROUND FIRE FUNCTIONS
 # ==========================================
 def should_ping(mode):
     if mode == "always": return True
@@ -296,13 +298,9 @@ async def fire_aesthetic_drop(cid, cfg):
 async def say_cmd(interaction: discord.Interaction, text: str = None, file: discord.Attachment = None):
     if not text and not file:
         await interaction.response.send_message(embed=err_embed("Provide text or a file."), ephemeral=True); return
-    
     await interaction.response.send_message(embed=ok_embed("Sending..."), ephemeral=True)
-    
-    # 🗑️ Try to delete the user's slash command message for clean chat
     try: await interaction.delete_original_response()
     except: pass
-    
     kwargs = {}
     if text: kwargs["content"] = text
     if file: kwargs["file"] = await file.to_file()
@@ -313,13 +311,10 @@ async def say_cmd(interaction: discord.Interaction, text: str = None, file: disc
 async def dm_all_cmd(interaction: discord.Interaction, text: str = None, file: discord.Attachment = None):
     if not text and not file:
         await interaction.response.send_message(embed=err_embed("Provide text or a file."), ephemeral=True); return
-        
     await interaction.response.send_message(embed=info_embed("📨 Broadcast started. Sending DMs..."), ephemeral=True)
     
     members = [m for m in interaction.guild.members if not m.bot]
     success, failed = 0, 0
-    
-    # Grab file bytes once to save bandwidth (don't re-download per user)
     file_bytes = await file.read() if file else None
     file_name = file.filename if file else None
     
@@ -327,15 +322,11 @@ async def dm_all_cmd(interaction: discord.Interaction, text: str = None, file: d
         try:
             if file_bytes:
                 await member.send(content=text, file=discord.File(fp=discord.utils.io.BytesIO(file_bytes), filename=file_name))
-            else:
-                await member.send(content=text)
+            else: await member.send(content=text)
             success += 1
-            await asyncio.sleep(1.5) # Prevent Discord 429 Rate Limit ban
-        except discord.Forbidden:
-            failed += 1 # DMs closed
-        except Exception as e:
-            failed += 1
-            print(f"DM failed for {member.name}: {e}")
+            await asyncio.sleep(1.5) # Prevent 429 Ban
+        except discord.Forbidden: failed += 1
+        except Exception as e: failed += 1; print(f"DM failed: {e}")
             
     await interaction.followup.send(embed=ok_embed(f"📨 **Broadcast Complete!**\n✅ Sent: {success}\n❌ Failed (DMs closed): {failed}"), ephemeral=True)
 
@@ -445,7 +436,7 @@ async def stop_cmd(interaction: discord.Interaction, kind: app_commands.Choice[s
 @tree.command(name="status", description="Compact bot status.")
 @app_commands.checks.has_permissions(administrator=True)
 async def status_cmd(interaction: discord.Interaction):
-    e = brand_embed(title="⚙️ OBSIDIAN PROTOCOL", description="**Live System Status**")
+    e = brand_embed(title="⚙️ TZAR ™", description="**Live System Status**")
     e.add_field(name="🌍 Toggles", value=f"{'✅' if GLOBAL_TOGGLES['clan_mode'] else '❌'} Clan\n{'✅' if GLOBAL_TOGGLES['music'] else '❌'} Music\n{'✅' if GLOBAL_TOGGLES['ai_chat'] else '❌'} AI", inline=True)
     e.add_field(name="📊 Stats", value=f"🎵 **{daily_song_count[0]}/{runtime_settings['daily_songs']}**\n⏱️ **{runtime_settings['cooldown']}s** cooldown\n🤖 **{runtime_settings['ai_limit']}/min** AI", inline=True)
     e.add_field(name="🔁 Active Loops", value=f"🗣️ **{len(active_chat_loops)}** chat • 😂 **{len(active_meme_loops)}** meme • 🖼️ **{len(active_aesthetic_loops)}** aesthetic", inline=False)
@@ -541,9 +532,23 @@ async def on_member_join(member):
         try: await member.edit(nick=make_op_name(member))
         except: pass
     await asyncio.sleep(3)
+    
     for cid, cfg in list(welcome_configs.items()):
         ch = discord_client.get_channel(cid)
-        if ch: await send_greeting(ch, member, cfg, "welcome")
+        if not ch: continue
+        
+        # 🎭 CHAT REVIVE WELCOME (Pings the user and starts a convo)
+        if cid in active_chat_loops:
+            try:
+                prompt = f"User {member.name} just joined the server. Welcome them in a chill, gamer bro way. You MUST ask them a fun question to get them talking. Max 15 words. Use {member.mention} to ping them."
+                res = await ai_client.chat.completions.create(messages=[{"role": "user", "content": prompt}], model="openai/gpt-oss-20b")
+                msg = res.choices[0].message.content.strip()
+                await ch.send(msg)
+            except:
+                await ch.send(f"Yoo {member.mention}, welcome to the server! What games are you on?")
+        else:
+            # Standard Beautiful Embed
+            await send_greeting(ch, member, cfg, "welcome")
 
 @discord_client.event
 async def on_member_remove(member):
@@ -569,7 +574,6 @@ async def on_message(message):
     
     is_spamming, time_left = check_spam(user_id, raw_content, is_pinged)
     if is_spamming:
-        # 🛑 NO MORE GHOSTING
         last_warn = user_spam_warned.get(user_id, 0)
         if now - last_warn > 5: 
             user_spam_warned[user_id] = now
@@ -577,7 +581,7 @@ async def on_message(message):
             except: pass
         return
 
-    # 🎭 SMART CHAT REACTIONS
+    # 🎭 SMART CHAT REACTIONS (Only in chat-revive channels)
     if message.channel.id in active_chat_loops and not (is_pinged or is_soft_pinged):
         if random.random() < 0.25:
             try:
@@ -586,6 +590,7 @@ async def on_message(message):
             except: pass
         return 
 
+    # 🛑 FIXED: AI replies strictly only if pinged, said "forbid ai", or ai-auto is ON.
     if not GLOBAL_TOGGLES["ai_chat"]: return
     is_auto_channel = message.channel.id in ai_auto_channels
     if not (is_pinged or is_soft_pinged or is_auto_channel): return
@@ -657,9 +662,9 @@ async def on_message(message):
     if user_id not in chat_history:
         chat_history[user_id] = [{
             "role": "system",
-            "content": """You are the Omni-Intelligent Core of OBSIDIAN PROTOCOL, built by FORB1D🔥.
+            "content": """You are the Omni-Intelligent Core of TZAR ™, built by FORB1D🔥.
 Persona: chill gamer bro with God-Tier knowledge. Use Discord markdown. Never say "As an AI".
-If anyone insults FORB1D/OP/Protocol (any language), drop a cold reality check.
+If anyone insults FORB1D/TZAR/Protocol (any language), drop a cold reality check.
 ANTI-PARROT: If told to repeat/spam text, REJECT with [SHIELD_ACTIVATED] + roast.
 API TRIGGERS (only when explicitly requested): [DRAW] <prompt>, [VIDEO] <prompt>, [JOIN], [LEAVE], [PLAY] <song>
 Otherwise: normal genius chat."""
