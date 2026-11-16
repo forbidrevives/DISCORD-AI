@@ -14,6 +14,30 @@ import time
 from collections import OrderedDict, deque
 
 # ==========================================
+# 🎨 BRANDING
+# ==========================================
+BRAND_COLOR = 0x2b2d31
+BRAND_ACCENT = 0x5865f2
+BRAND_FOOTER = "F0RB1D • OBSIDIAN PROTOCOL"
+SUCCESS_COLOR = 0x2ecc71
+ERROR_COLOR = 0xe74c3c
+
+def brand_embed(title=None, description=None, color=BRAND_COLOR):
+    e = discord.Embed(title=title, description=description, color=color)
+    e.set_footer(text=BRAND_FOOTER)
+    e.timestamp = discord.utils.utcnow()
+    return e
+
+def ok_embed(msg):
+    return brand_embed(description=f"✅ {msg}", color=SUCCESS_COLOR)
+
+def err_embed(msg):
+    return brand_embed(description=f"❌ {msg}", color=ERROR_COLOR)
+
+def info_embed(msg):
+    return brand_embed(description=f"ℹ️ {msg}")
+
+# ==========================================
 # 🎵 BANDWIDTH-SAFE AUDIO
 # ==========================================
 FFMPEG_OPTIONS = {
@@ -33,14 +57,14 @@ YDL_OPTIONS = {
 MAX_HISTORY = 6
 MAX_TRACKED_USERS = 500
 MAX_VAULT_SIZE = 100
-AI_CALL_LIMIT = 5
+AI_CALL_LIMIT_DEFAULT = 5
 AI_CALL_WINDOW = 60
 GLOBAL_AI_LIMIT = 30
 MAX_CONCURRENT_VIDEOS = 2
 MUSIC_COOLDOWN = 600
 
 # ==========================================
-# 🎛️ RUNTIME SETTINGS (editable by commands)
+# 🎛️ RUNTIME SETTINGS
 # ==========================================
 runtime_settings = {
     "cooldown": 4,
@@ -48,7 +72,6 @@ runtime_settings = {
     "ai_limit": 5,
 }
 
-# Global on/off toggles
 GLOBAL_TOGGLES = {
     "clan_mode": True,
     "music": True,
@@ -86,6 +109,7 @@ ai_client = AsyncGroq(api_key=GROQ_KEY)
 # ==========================================
 chat_history = {}
 user_cooldowns = OrderedDict()
+user_spam_warned = OrderedDict()
 user_diamonds = {}
 user_ai_calls = OrderedDict()
 global_ai_calls = deque()
@@ -99,6 +123,7 @@ leave_configs = {}
 active_meme_loops = {}
 active_chat_loops = {}
 active_aesthetic_loops = {}
+ai_auto_channels = {}
 
 pfp_bot_id = 1373666241033535558
 pfp_router = {}
@@ -133,6 +158,8 @@ def prune_trackers():
         del chat_history[next(iter(chat_history))]
     while len(user_cooldowns) > MAX_TRACKED_USERS:
         user_cooldowns.popitem(last=False)
+    while len(user_spam_warned) > MAX_TRACKED_USERS:
+        user_spam_warned.popitem(last=False)
     while len(user_diamonds) > MAX_TRACKED_USERS:
         user_diamonds.pop(next(iter(user_diamonds)))
     for uid in list(user_ai_calls.keys()):
@@ -172,7 +199,7 @@ async def scan_image_text(image_url):
     return ""
 
 # ==========================================
-# 🎨 GREETING BUILDER
+# 🎨 GREETING BUILDER (pro-bot style)
 # ==========================================
 async def build_greeting(member, cfg, kind="welcome"):
     if cfg.get("template"):
@@ -198,17 +225,39 @@ async def send_greeting(ch, member, cfg, kind="welcome"):
     try:
         async with ch.typing():
             text = await build_greeting(member, cfg, kind)
+        
+        e = discord.Embed(description=text, color=BRAND_COLOR)
+        
+        # Author line: user's name with their avatar
+        verb = "just joined!" if kind == "welcome" else "just left"
+        e.set_author(name=f"{member.name} {verb}", icon_url=member.display_avatar.url)
+        
+        # Thumbnail on welcome only (small avatar bubble)
+        if kind == "welcome":
+            e.set_thumbnail(url=member.display_avatar.url)
+        
+        # GIF as main image
         if cfg.get("gif_url"):
-            embed = discord.Embed(description=text, color=0x2b2d31)
-            embed.set_image(url=cfg["gif_url"])
-            await ch.send(embed=embed)
-        else:
-            await ch.send(text)
-    except Exception as e: print(f"{kind} send: {e}")
+            e.set_image(url=cfg["gif_url"])
+        
+        # Footer with member count
+        count = member.guild.member_count or 0
+        meta = f"Member #{count:,}" if kind == "welcome" else f"{count:,} members left"
+        e.set_footer(text=f"{BRAND_FOOTER} • {meta}")
+        e.timestamp = discord.utils.utcnow()
+        
+        await ch.send(embed=e)
+    except Exception as e:
+        print(f"{kind} send: {e}")
 
 # ==========================================
-# 🔥 BACKGROUND FIRE FUNCTIONS (no ticker blocking)
+# 🔥 BACKGROUND FIRE FUNCTIONS
 # ==========================================
+def should_ping(mode):
+    if mode == "always": return True
+    if mode == "random": return random.random() < 0.25
+    return False
+
 async def fire_chat_drop(cid, cfg):
     ch = discord_client.get_channel(cid)
     if not ch: return
@@ -218,7 +267,7 @@ async def fire_chat_drop(cid, cfg):
             messages=[{"role": "user", "content": prompt}], model="openai/gpt-oss-20b"
         )
         msg = res.choices[0].message.content.strip()
-        await ch.send(f"@everyone {msg}" if cfg["ping"] else msg)
+        await ch.send(f"@everyone {msg}" if should_ping(cfg.get("ping_mode", "never")) else msg)
     except Exception as e: print(f"Chat drop: {e}")
 
 async def fire_meme_drop(cid, cfg):
@@ -243,10 +292,10 @@ async def fire_aesthetic_drop(cid, cfg):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
             async with session.get("https://api.unsplash.com/photos/random", params=params) as resp:
                 data = await resp.json()
-                embed = discord.Embed(title="🔥 Fresh Drop", description="Steal this.", color=0x2b2d31)
-                embed.set_image(url=data["urls"]["regular"])
-                embed.set_footer(text=f"Shot by {data['user']['name']}")
-                await ch.send(embed=embed)
+                e = brand_embed(title="🔥 Fresh Drop", description="Steal this for your profile.")
+                e.set_image(url=data["urls"]["regular"])
+                e.set_footer(text=f"📸 {data['user']['name']} • {BRAND_FOOTER}")
+                await ch.send(embed=e)
     except Exception as e: print(f"Aesthetic drop: {e}")
 
 # ==========================================
@@ -259,15 +308,16 @@ async def welcome_cmd(interaction: discord.Interaction, enabled: bool,
     cid = interaction.channel.id
     if not enabled:
         welcome_configs.pop(cid, None)
-        await interaction.response.send_message("🛑 Welcome OFF here.", ephemeral=True)
+        await interaction.response.send_message(embed=ok_embed("Welcome **OFF** here."), ephemeral=True)
         return
     welcome_configs[cid] = {"template": template, "gif_url": gif_url}
-    mode = "template" if template else "AI-generated"
-    gif = " + GIF" if gif_url else ""
-    await interaction.response.send_message(
-        f"✅ **Welcome ON** in {interaction.channel.mention} ({mode}{gif})\n*Placeholders: `{user}` `{name}` `{server}`*",
-        ephemeral=True
+    mode = "📝 template" if template else "🤖 AI-generated"
+    gif = " + 🎬 GIF" if gif_url else ""
+    e = brand_embed(
+        title="🎉 Welcome ON",
+        description=f"**Channel:** {interaction.channel.mention}\n**Mode:** {mode}{gif}\n\n*Placeholders: `{user}` `{name}` `{server}`*"
     )
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 @tree.command(name="leave", description="Toggle leave messages in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -276,40 +326,56 @@ async def leave_cmd(interaction: discord.Interaction, enabled: bool,
     cid = interaction.channel.id
     if not enabled:
         leave_configs.pop(cid, None)
-        await interaction.response.send_message("🛑 Leave OFF here.", ephemeral=True)
+        await interaction.response.send_message(embed=ok_embed("Leave **OFF** here."), ephemeral=True)
         return
     leave_configs[cid] = {"template": template, "gif_url": gif_url}
-    mode = "template" if template else "AI-generated"
-    gif = " + GIF" if gif_url else ""
-    await interaction.response.send_message(
-        f"✅ **Leave ON** in {interaction.channel.mention} ({mode}{gif})\n*Placeholders: `{user}` `{name}` `{server}`*",
-        ephemeral=True
+    mode = "📝 template" if template else "🤖 AI-generated"
+    gif = " + 🎬 GIF" if gif_url else ""
+    e = brand_embed(
+        title="👋 Leave ON",
+        description=f"**Channel:** {interaction.channel.mention}\n**Mode:** {mode}{gif}\n\n*Placeholders: `{user}` `{name}` `{server}`*"
     )
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 # ==========================================
-# ⚙️ LOOP TOGGLES (True/False)
+# ⚙️ LOOPS
 # ==========================================
 @tree.command(name="chat-revive", description="Toggle AI chat reviver in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
-async def chat_revive_cmd(interaction: discord.Interaction,
-                          enabled: bool, minutes: int = 120, ping: bool = False):
+@app_commands.choices(ping_mode=[
+    app_commands.Choice(name="🔕 Never ping", value="never"),
+    app_commands.Choice(name="📢 Always ping", value="always"),
+    app_commands.Choice(name="🎲 Random (~25%)", value="random"),
+])
+async def chat_revive_cmd(
+    interaction: discord.Interaction,
+    enabled: bool,
+    minutes: int = 120,
+    ping_mode: str = "never",
+):
     cid = interaction.channel.id
     if not enabled:
         active_chat_loops.pop(cid, None)
-        await interaction.response.send_message("🛑 Chat Reviver OFF here.", ephemeral=True)
+        await interaction.response.send_message(embed=ok_embed("Chat Reviver **OFF** here."), ephemeral=True)
         return
     if minutes < 1:
-        await interaction.response.send_message("❌ Minimum 1 minute.", ephemeral=True)
+        await interaction.response.send_message(embed=err_embed("Minimum 1 minute."), ephemeral=True)
         return
-    cfg = {"interval": minutes * 60, "last_drop": time.time(), "ping": ping}
+    cfg = {"interval": minutes * 60, "last_drop": time.time(), "ping_mode": ping_mode}
     active_chat_loops[cid] = cfg
-    warn = ""
-    if minutes <= 5:
-        warn = f"\n⚠️ **{60 // minutes} AI calls per hour** on Groq — watch your quota."
-    await interaction.response.send_message(
-        f"🔥 **Chat Reviver ON** here (every {minutes}m, ping: {ping})\n⏱️ First drop firing now...{warn}",
-        ephemeral=True
+    
+    mode_emoji = {"never": "🔕", "always": "📢", "random": "🎲"}[ping_mode]
+    warn = "\n⚠️ *High frequency = more AI quota use.*" if minutes <= 5 else ""
+    e = brand_embed(
+        title="🗣️ Chat Reviver ON",
+        description=(
+            f"**Channel:** {interaction.channel.mention}\n"
+            f"**Interval:** every {minutes}m\n"
+            f"**Ping:** {mode_emoji} {ping_mode.title()}{warn}\n\n"
+            f"⏱️ First drop firing **now**..."
+        )
     )
+    await interaction.response.send_message(embed=e, ephemeral=True)
     asyncio.create_task(fire_chat_drop(cid, cfg))
 
 @tree.command(name="meme", description="Toggle meme dropper in THIS channel.")
@@ -318,16 +384,18 @@ async def meme_cmd(interaction: discord.Interaction, enabled: bool, minutes: int
     cid = interaction.channel.id
     if not enabled:
         active_meme_loops.pop(cid, None)
-        await interaction.response.send_message("🛑 Meme Dropper OFF here.", ephemeral=True)
+        await interaction.response.send_message(embed=ok_embed("Meme Dropper **OFF** here."), ephemeral=True)
         return
     if minutes < 1:
-        await interaction.response.send_message("❌ Minimum 1 minute.", ephemeral=True)
+        await interaction.response.send_message(embed=err_embed("Minimum 1 minute."), ephemeral=True)
         return
     cfg = {"interval": minutes * 60, "last_drop": time.time()}
     active_meme_loops[cid] = cfg
-    await interaction.response.send_message(
-        f"🔥 **Meme Dropper ON** here (every {minutes}m)\n⏱️ First drop firing now...", ephemeral=True
+    e = brand_embed(
+        title="😂 Meme Dropper ON",
+        description=f"**Channel:** {interaction.channel.mention}\n**Interval:** every {minutes}m\n\n⏱️ First drop firing **now**..."
     )
+    await interaction.response.send_message(embed=e, ephemeral=True)
     asyncio.create_task(fire_meme_drop(cid, cfg))
 
 @tree.command(name="aesthetic", description="Toggle Unsplash image dropper in THIS channel.")
@@ -337,18 +405,34 @@ async def aesthetic_cmd(interaction: discord.Interaction, enabled: bool,
     cid = interaction.channel.id
     if not enabled:
         active_aesthetic_loops.pop(cid, None)
-        await interaction.response.send_message("🛑 Aesthetic OFF here.", ephemeral=True)
+        await interaction.response.send_message(embed=ok_embed("Aesthetic **OFF** here."), ephemeral=True)
         return
     if minutes < 1:
-        await interaction.response.send_message("❌ Minimum 1 minute.", ephemeral=True)
+        await interaction.response.send_message(embed=err_embed("Minimum 1 minute."), ephemeral=True)
         return
     cfg = {"interval": minutes * 60, "last_drop": time.time(),
            "query": query, "landscape": landscape}
     active_aesthetic_loops[cid] = cfg
-    await interaction.response.send_message(
-        f"🔥 **Aesthetic ON** here ('{query}', every {minutes}m)\n⏱️ First drop firing now...", ephemeral=True
+    e = brand_embed(
+        title="🖼️ Aesthetic ON",
+        description=f"**Channel:** {interaction.channel.mention}\n**Query:** `{query}`\n**Interval:** every {minutes}m\n\n⏱️ First drop firing **now**..."
     )
+    await interaction.response.send_message(embed=e, ephemeral=True)
     asyncio.create_task(fire_aesthetic_drop(cid, cfg))
+
+@tree.command(name="ai-auto", description="AI replies to EVERY message in THIS channel.")
+@app_commands.checks.has_permissions(administrator=True)
+async def ai_auto_cmd(interaction: discord.Interaction, enabled: bool):
+    cid = interaction.channel.id
+    if enabled:
+        ai_auto_channels[cid] = True
+        await interaction.response.send_message(
+            embed=ok_embed(f"🤖 AI will reply to **every message** in {interaction.channel.mention}."),
+            ephemeral=True
+        )
+    else:
+        ai_auto_channels.pop(cid, None)
+        await interaction.response.send_message(embed=ok_embed("AI auto-reply disabled here."), ephemeral=True)
 
 # ==========================================
 # ⚙️ GLOBAL TOGGLES
@@ -357,25 +441,25 @@ async def aesthetic_cmd(interaction: discord.Interaction, enabled: bool,
 @app_commands.checks.has_permissions(administrator=True)
 async def clan_mode_cmd(interaction: discord.Interaction, enabled: bool):
     GLOBAL_TOGGLES["clan_mode"] = enabled
-    await interaction.response.send_message(f"✅ Clan Mode: **{'ON' if enabled else 'OFF'}**", ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"Clan Mode: **{'ON' if enabled else 'OFF'}**"), ephemeral=True)
 
 @tree.command(name="music", description="Toggle music system globally.")
 @app_commands.checks.has_permissions(administrator=True)
 async def music_cmd(interaction: discord.Interaction, enabled: bool):
     GLOBAL_TOGGLES["music"] = enabled
-    await interaction.response.send_message(f"✅ Music: **{'ON' if enabled else 'OFF'}**", ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"Music: **{'ON' if enabled else 'OFF'}**"), ephemeral=True)
 
 @tree.command(name="ai", description="Toggle AI chat replies globally.")
 @app_commands.checks.has_permissions(administrator=True)
 async def ai_cmd(interaction: discord.Interaction, enabled: bool):
     GLOBAL_TOGGLES["ai_chat"] = enabled
-    await interaction.response.send_message(f"✅ AI Chat: **{'ON' if enabled else 'OFF'}**", ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"AI Chat: **{'ON' if enabled else 'OFF'}**"), ephemeral=True)
 
 @tree.command(name="pfp", description="Toggle PFP vault globally.")
 @app_commands.checks.has_permissions(administrator=True)
 async def pfp_toggle_cmd(interaction: discord.Interaction, enabled: bool):
     GLOBAL_TOGGLES["pfp_vault"] = enabled
-    await interaction.response.send_message(f"✅ PFP Vault: **{'ON' if enabled else 'OFF'}**", ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"PFP Vault: **{'ON' if enabled else 'OFF'}**"), ephemeral=True)
 
 # ==========================================
 # ⚙️ TUNING
@@ -384,22 +468,20 @@ async def pfp_toggle_cmd(interaction: discord.Interaction, enabled: bool):
 @app_commands.checks.has_permissions(administrator=True)
 async def cooldown_cmd(interaction: discord.Interaction, seconds: int):
     if seconds < 1:
-        await interaction.response.send_message("❌ Minimum 1s.", ephemeral=True)
-        return
+        await interaction.response.send_message(embed=err_embed("Minimum 1s."), ephemeral=True); return
     runtime_settings["cooldown"] = seconds
-    await interaction.response.send_message(f"✅ Cooldown: **{seconds}s**", ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"Cooldown: **{seconds}s**"), ephemeral=True)
 
 @tree.command(name="daily-songs", description="Set daily music budget (songs/day).")
 @app_commands.checks.has_permissions(administrator=True)
 async def daily_songs_cmd(interaction: discord.Interaction, songs: int):
     if songs < 0:
-        await interaction.response.send_message("❌ Can't be negative.", ephemeral=True)
-        return
+        await interaction.response.send_message(embed=err_embed("Can't be negative."), ephemeral=True); return
     runtime_settings["daily_songs"] = songs
-    await interaction.response.send_message(f"✅ Daily music: **{songs} songs/day**", ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"Daily music: **{songs} songs/day**"), ephemeral=True)
 
 # ==========================================
-# ⚙️ STOP COMMAND
+# ⚙️ STOP
 # ==========================================
 @tree.command(name="stop", description="Stop something in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -407,6 +489,7 @@ async def daily_songs_cmd(interaction: discord.Interaction, songs: int):
     app_commands.Choice(name="chat-reviver", value="chat"),
     app_commands.Choice(name="meme-dropper", value="meme"),
     app_commands.Choice(name="aesthetic-dropper", value="aesthetic"),
+    app_commands.Choice(name="ai-auto", value="ai_auto"),
     app_commands.Choice(name="welcome", value="welcome"),
     app_commands.Choice(name="leave", value="leave"),
     app_commands.Choice(name="ALL", value="all"),
@@ -414,22 +497,16 @@ async def daily_songs_cmd(interaction: discord.Interaction, songs: int):
 async def stop_cmd(interaction: discord.Interaction, kind: app_commands.Choice[str]):
     cid = interaction.channel.id
     stopped = []
-    if kind.value in ("chat", "all") and active_chat_loops.pop(cid, None):
-        stopped.append("chat-reviver")
-    if kind.value in ("meme", "all") and active_meme_loops.pop(cid, None):
-        stopped.append("meme-dropper")
-    if kind.value in ("aesthetic", "all") and active_aesthetic_loops.pop(cid, None):
-        stopped.append("aesthetic-dropper")
-    if kind.value in ("welcome", "all") and welcome_configs.pop(cid, None):
-        stopped.append("welcome")
-    if kind.value in ("leave", "all") and leave_configs.pop(cid, None):
-        stopped.append("leave")
+    if kind.value in ("chat", "all") and active_chat_loops.pop(cid, None): stopped.append("chat-reviver")
+    if kind.value in ("meme", "all") and active_meme_loops.pop(cid, None): stopped.append("meme-dropper")
+    if kind.value in ("aesthetic", "all") and active_aesthetic_loops.pop(cid, None): stopped.append("aesthetic-dropper")
+    if kind.value in ("ai_auto", "all") and ai_auto_channels.pop(cid, None): stopped.append("ai-auto")
+    if kind.value in ("welcome", "all") and welcome_configs.pop(cid, None): stopped.append("welcome")
+    if kind.value in ("leave", "all") and leave_configs.pop(cid, None): stopped.append("leave")
     if stopped:
-        await interaction.response.send_message(
-            f"🛑 Stopped: **{', '.join(stopped)}**", ephemeral=True
-        )
+        await interaction.response.send_message(embed=ok_embed(f"Stopped: **{', '.join(stopped)}**"), ephemeral=True)
     else:
-        await interaction.response.send_message(f"Nothing ({kind.value}) running here.", ephemeral=True)
+        await interaction.response.send_message(embed=info_embed(f"Nothing ({kind.value}) running here."), ephemeral=True)
 
 # ==========================================
 # ⚙️ PFP COMMANDS
@@ -441,26 +518,30 @@ async def pfp_add_cmd(interaction: discord.Interaction, feed: discord.TextChanne
     if target.id not in image_vault:
         image_vault[target.id] = []
         next_drop_time[target.id] = 0
-    await interaction.response.send_message(
-        f"✅ {feed.mention} → {target.mention}", ephemeral=True
-    )
+    await interaction.response.send_message(embed=ok_embed(f"{feed.mention} → {target.mention}"), ephemeral=True)
 
 @tree.command(name="pfp-remove", description="Stop stealing from a feed channel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def pfp_remove_cmd(interaction: discord.Interaction, feed: discord.TextChannel):
     if feed.id in pfp_router:
         del pfp_router[feed.id]
-        await interaction.response.send_message(f"🛑 Removed {feed.mention}", ephemeral=True)
+        await interaction.response.send_message(embed=ok_embed(f"Removed {feed.mention}"), ephemeral=True)
     else:
-        await interaction.response.send_message("Not configured.", ephemeral=True)
+        await interaction.response.send_message(embed=info_embed("Not configured."), ephemeral=True)
 
 @tree.command(name="pfp-list", description="Show PFP routes.")
 @app_commands.checks.has_permissions(administrator=True)
 async def pfp_list_cmd(interaction: discord.Interaction):
     if not pfp_router:
-        await interaction.response.send_message("No PFP routes.", ephemeral=True); return
-    lines = [f"<#{f}> → <#{t}> (vault: {len(image_vault.get(t, []))})" for f, t in pfp_router.items()]
-    await interaction.response.send_message("**PFP Routes:**\n" + "\n".join(lines), ephemeral=True)
+        await interaction.response.send_message(embed=info_embed("No PFP routes."), ephemeral=True); return
+    e = brand_embed(title="🥷 PFP ROUTES")
+    for f, t in pfp_router.items():
+        e.add_field(
+            name=f"<#{f}>",
+            value=f"→ <#{t}>\n📦 {len(image_vault.get(t, []))}/10",
+            inline=True
+        )
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 @tree.command(name="pfp-bot", description="Set the PFP bot's user ID.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -468,92 +549,126 @@ async def pfp_bot_cmd(interaction: discord.Interaction, user_id: str):
     global pfp_bot_id
     try:
         pfp_bot_id = int(user_id)
-        await interaction.response.send_message(f"✅ PFP bot ID: {pfp_bot_id}", ephemeral=True)
+        await interaction.response.send_message(embed=ok_embed(f"PFP bot ID: `{pfp_bot_id}`"), ephemeral=True)
     except:
-        await interaction.response.send_message("Invalid ID.", ephemeral=True)
+        await interaction.response.send_message(embed=err_embed("Invalid ID."), ephemeral=True)
 
 # ==========================================
-# ⚙️ STATUS + HELP
+# ⚙️ STATUS (mobile-optimized, compact)
 # ==========================================
-@tree.command(name="status", description="Show all bot config.")
+@tree.command(name="status", description="Compact bot status.")
 @app_commands.checks.has_permissions(administrator=True)
 async def status_cmd(interaction: discord.Interaction):
-    lines = ["**⚙️ OBSIDIAN PROTOCOL STATUS**", ""]
-    lines.append("**🌍 Global toggles:**")
-    for k, v in GLOBAL_TOGGLES.items():
-        lines.append(f"  {'✅' if v else '❌'} {k}: {'ON' if v else 'OFF'}")
-    lines.append(f"\n**🎵 Music:** {daily_song_count[0]}/{runtime_settings['daily_songs']} today")
-    lines.append(f"**⏱️ Cooldown:** {runtime_settings['cooldown']}s")
-    lines.append(f"**🤖 AI limit:** {runtime_settings['ai_limit']}/min per user")
-
-    if welcome_configs:
-        lines.append("\n**🎉 Welcome:**")
-        for cid, cfg in welcome_configs.items():
-            mode = "template" if cfg.get("template") else "AI"
-            gif = " + GIF" if cfg.get("gif_url") else ""
-            lines.append(f"  <#{cid}> ({mode}{gif})")
-    if leave_configs:
-        lines.append("\n**👋 Leave:**")
-        for cid, cfg in leave_configs.items():
-            mode = "template" if cfg.get("template") else "AI"
-            gif = " + GIF" if cfg.get("gif_url") else ""
-            lines.append(f"  <#{cid}> ({mode}{gif})")
-    if active_chat_loops:
-        lines.append("\n**🗣️ Chat revivers:**")
-        for cid, cfg in active_chat_loops.items():
-            lines.append(f"  <#{cid}> every {cfg['interval']//60}m")
-    if active_meme_loops:
-        lines.append("\n**😂 Meme droppers:**")
-        for cid, cfg in active_meme_loops.items():
-            lines.append(f"  <#{cid}> every {cfg['interval']//60}m")
-    if active_aesthetic_loops:
-        lines.append("\n**🖼️ Aesthetic droppers:**")
-        for cid, cfg in active_aesthetic_loops.items():
-            lines.append(f"  <#{cid}> every {cfg['interval']//60}m ('{cfg['query']}')")
-    if pfp_router:
-        lines.append(f"\n**🥷 PFP routes:** {len(pfp_router)}")
-
-    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+    e = brand_embed(title="⚙️ OBSIDIAN PROTOCOL", description="**Live System Status**")
+    
+    # 2 inline fields (side-by-side on desktop, stacked short on mobile)
+    toggles = (
+        f"{'✅' if GLOBAL_TOGGLES['clan_mode'] else '❌'} Clan\n"
+        f"{'✅' if GLOBAL_TOGGLES['music'] else '❌'} Music\n"
+        f"{'✅' if GLOBAL_TOGGLES['ai_chat'] else '❌'} AI\n"
+        f"{'✅' if GLOBAL_TOGGLES['pfp_vault'] else '❌'} PFP"
+    )
+    e.add_field(name="🌍 Toggles", value=toggles, inline=True)
+    
+    stats = (
+        f"🎵 **{daily_song_count[0]}/{runtime_settings['daily_songs']}**\n"
+        f"⏱️ **{runtime_settings['cooldown']}s** cooldown\n"
+        f"🤖 **{runtime_settings['ai_limit']}/min** AI\n"
+        f"💎 **{len(user_diamonds)}** users"
+    )
+    e.add_field(name="📊 Stats", value=stats, inline=True)
+    
+    # Full-width fields (each short, no wrap)
+    e.add_field(
+        name="🔁 Active Loops",
+        value=(
+            f"🗣️ **{len(active_chat_loops)}** chat • "
+            f"😂 **{len(active_meme_loops)}** meme • "
+            f"🖼️ **{len(active_aesthetic_loops)}** aesthetic"
+        ),
+        inline=False
+    )
+    
+    e.add_field(
+        name="📌 Configs",
+        value=(
+            f"🎉 **{len(welcome_configs)}** welcome • "
+            f"💔 **{len(leave_configs)}** leave\n"
+            f"🤖 **{len(ai_auto_channels)}** AI-auto • "
+            f"🥷 **{len(pfp_router)}** PFP routes"
+        ),
+        inline=False
+    )
+    
+    e.timestamp = discord.utils.utcnow()
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 @tree.command(name="help", description="Show all commands.")
 @app_commands.checks.has_permissions(administrator=True)
 async def help_cmd(interaction: discord.Interaction):
-    text = (
-        "**📖 OBSIDIAN PROTOCOL COMMANDS**\n\n"
-        "**Channel-scoped:**\n"
-        "`/welcome enabled: [template] [gif_url]` — welcome msgs here\n"
-        "`/leave enabled: [template] [gif_url]` — leave msgs here\n"
-        "`/chat-revive enabled: [minutes] [ping]` — AI chat loop here\n"
-        "`/meme enabled: [minutes]` — meme dropper here\n"
-        "`/aesthetic enabled: [minutes] [query] [landscape]` — Unsplash drops here\n"
-        "`/stop kind:` — stop something here\n\n"
-        "**Global toggles:**\n"
-        "`/clan-mode enabled:` — OP auto-rename\n"
-        "`/music enabled:` — music system\n"
-        "`/ai enabled:` — AI chat replies\n"
-        "`/pfp enabled:` — PFP vault\n\n"
-        "**Tuning:**\n"
-        "`/cooldown seconds:` — spam cooldown\n"
-        "`/daily-songs songs:` — music budget\n\n"
-        "**PFP:**\n"
-        "`/pfp-add feed: target:` `/pfp-remove` `/pfp-list` `/pfp-bot`\n\n"
-        "**Info:**\n"
-        "`/status` `/help`\n\n"
-        "**Templates:** `{user}` `{name}` `{server}`"
+    e = brand_embed(
+        title="📖 COMMAND GUIDE",
+        description="🔒 *Admin only. Run in the channel you want to affect.*"
     )
-    await interaction.response.send_message(text, ephemeral=True)
+    e.add_field(
+        name="🎉 Greetings",
+        value=(
+            "`/welcome enabled:` ON/OFF here\n"
+            "`/leave enabled:` ON/OFF here\n"
+            "> Optional: `template` `gif_url`"
+        ),
+        inline=False
+    )
+    e.add_field(
+        name="🔁 Loops",
+        value=(
+            "`/chat-revive enabled:` AI chat\n"
+            "`/meme enabled:` meme dropper\n"
+            "`/aesthetic enabled:` Unsplash\n"
+            "`/ai-auto enabled:` AI replies to all\n"
+            "`/stop kind:` stop here"
+        ),
+        inline=False
+    )
+    e.add_field(
+        name="🌍 Global",
+        value="`/clan-mode` `/music` `/ai` `/pfp`",
+        inline=False
+    )
+    e.add_field(
+        name="🎛️ Tuning",
+        value="`/cooldown seconds:` `/daily-songs songs:`",
+        inline=False
+    )
+    e.add_field(
+        name="🥷 PFP Vault",
+        value="`/pfp-add` `/pfp-remove` `/pfp-list` `/pfp-bot`",
+        inline=False
+    )
+    e.add_field(
+        name="ℹ️ Info",
+        value="`/status` `/help`",
+        inline=False
+    )
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 # ==========================================
-# 🚨 ERROR HANDLER
+# 🚨 ERROR HANDLER (branded)
 # ==========================================
 @tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
-        try: await interaction.response.send_message("🛑 **Admin only**, bro.", ephemeral=True)
+        try:
+            await interaction.response.send_message(
+                embed=err_embed("**Admin only**, bro."), ephemeral=True
+            )
         except: pass
     else:
         print(f"Command error: {error}")
-        try: await interaction.response.send_message(f"❌ `{error}`", ephemeral=True)
+        try:
+            await interaction.response.send_message(
+                embed=err_embed(f"`{error}`"), ephemeral=True
+            )
         except: pass
 
 # ==========================================
@@ -592,10 +707,10 @@ async def smart_pfp_dropper():
                 if ch:
                     for img_url in vault[:10]:
                         bar = f"`♠` `🖤` `♠` • [Download]({img_url}) • `♠` `🖤` `♠`"
-                        embed = discord.Embed(color=0x2b2d31)
-                        embed.set_image(url=img_url)
-                        embed.set_footer(text="F0RB1D • Premium Drops")
-                        try: await ch.send(content=bar, embed=embed)
+                        e = discord.Embed(color=BRAND_COLOR)
+                        e.set_image(url=img_url)
+                        e.set_footer(text=f"F0RB1D • Premium Drops • {BRAND_FOOTER}")
+                        try: await ch.send(content=bar, embed=e)
                         except Exception as e: print(f"PFP: {e}")
                         await asyncio.sleep(2)
                 image_vault[target_id] = []
@@ -685,6 +800,7 @@ async def on_member_remove(member):
 # ==========================================
 @discord_client.event
 async def on_message(message):
+    # PFP vault hoarder
     if GLOBAL_TOGGLES["pfp_vault"] and message.author.id == pfp_bot_id and message.channel.id in pfp_router:
         target = pfp_router[message.channel.id]
         if target not in image_vault:
@@ -706,16 +822,36 @@ async def on_message(message):
     raw_content = message.content
     now = time.time()
 
-    if user_id in user_cooldowns and (now - user_cooldowns[user_id] < runtime_settings["cooldown"]):
-        return
     is_pinged = discord_client.user.mentioned_in(message)
     is_soft_pinged = "forbid ai" in raw_content.lower()
-    if not (is_pinged or is_soft_pinged): return
+    is_auto_channel = message.channel.id in ai_auto_channels
+    if not (is_pinged or is_soft_pinged or is_auto_channel): return
 
+    # 🛡️ SPAM COOLDOWN (with friendly warning)
+    if user_id in user_cooldowns and (now - user_cooldowns[user_id] < runtime_settings["cooldown"]):
+        last_warn = user_spam_warned.get(user_id, 0)
+        if now - last_warn > 20:
+            user_spam_warned[user_id] = now
+            remain = int(runtime_settings["cooldown"] - (now - user_cooldowns[user_id])) + 1
+            try:
+                await message.reply(f"⏱️ Chill bro — wait **{remain}s**.", delete_after=5)
+            except: pass
+        return
+
+    # 🛡️ RATE LIMIT (with friendly warning)
     stamps = [t for t in user_ai_calls.get(user_id, []) if now - t < AI_CALL_WINDOW]
-    if len(stamps) >= runtime_settings["ai_limit"]: return
+    if len(stamps) >= runtime_settings["ai_limit"]:
+        last_warn = user_spam_warned.get(user_id, 0)
+        if now - last_warn > 20:
+            user_spam_warned[user_id] = now
+            try:
+                await message.reply(f"🛑 Too many messages ({runtime_settings['ai_limit']}/min). Wait a minute.", delete_after=5)
+            except: pass
+        return
     while global_ai_calls and now - global_ai_calls[0] > 60: global_ai_calls.popleft()
-    if len(global_ai_calls) >= GLOBAL_AI_LIMIT: return
+    if len(global_ai_calls) >= GLOBAL_AI_LIMIT:
+        return
+
     stamps.append(now)
     user_ai_calls[user_id] = deque(stamps, maxlen=runtime_settings["ai_limit"])
     global_ai_calls.append(now)
@@ -727,6 +863,7 @@ async def on_message(message):
 
     lower = raw_content.lower()
 
+    # Music quick commands
     if lower.startswith("join me"):
         if not GLOBAL_TOGGLES["music"]:
             await message.reply("🛑 Music disabled."); return
@@ -758,6 +895,7 @@ async def on_message(message):
             print(f"Music: {e}"); await message.reply("Music crashed.")
         return
 
+    # OCR
     image_url = next((att.url for att in message.attachments if att.content_type and att.content_type.startswith('image/')), None)
     if not raw_content.strip() and not image_url:
         await message.reply("Tag me with something!"); return
@@ -769,6 +907,7 @@ async def on_message(message):
         elif text:
             raw_content += f"\n\n[OCR: '{text}']"
 
+    # Chat history
     if user_id not in chat_history:
         chat_history[user_id] = [{
             "role": "system",
@@ -810,11 +949,11 @@ Otherwise: normal genius chat."""
                             if resp.status in (400, 403, 404, 422): blocked = True
                 except: pass
                 if blocked:
-                    await message.reply(embed=discord.Embed(title="❌ Blocked", description="Prompt rejected.", color=discord.Color.red()))
+                    await message.reply(embed=err_embed("Prompt rejected by generator."))
                 else:
-                    embed = discord.Embed(title=f"🎨 {clean}"[:256], color=discord.Color.purple())
-                    embed.set_image(url=img_url); embed.set_footer(text="Generated by FORB1D🔥")
-                    await message.reply(embed=embed)
+                    e = brand_embed(title=f"🎨 {clean}"[:256], description="Generated by FORB1D🔥")
+                    e.set_image(url=img_url)
+                    await message.reply(embed=e)
             return
 
         if "[VIDEO]" in reply:
@@ -825,14 +964,14 @@ Otherwise: normal genius chat."""
                 user_diamonds[user_id]["diamonds"] = 5
             if user_diamonds[user_id]["diamonds"] <= 0:
                 left = user_diamonds[user_id]["cooldown_end"] - now
-                await message.reply(f"💎 Out. Restock in {int(left//3600)}h {int((left%3600)//60)}m."); return
+                await message.reply(embed=err_embed(f"Out of diamonds. Restock in {int(left//3600)}h {int((left%3600)//60)}m.")); return
             if active_video_generations >= MAX_CONCURRENT_VIDEOS:
-                await message.reply("🛑 Video server full."); return
+                await message.reply(embed=err_embed("Video server full.")); return
             user_diamonds[user_id]["diamonds"] -= 1
             if user_diamonds[user_id]["diamonds"] == 0: user_diamonds[user_id]["cooldown_end"] = now + 10800
-            await message.reply(f"💎 1 Diamond spent. ({user_diamonds[user_id]['diamonds']}/5 left)")
+            await message.reply(embed=info_embed(f"💎 1 Diamond spent. ({user_diamonds[user_id]['diamonds']}/5 left)"))
             active_video_generations += 1
-            status = await message.reply("🔄 Connecting...")
+            status = await message.reply(embed=info_embed("🔄 Connecting..."))
             try:
                 def gen():
                     from gradio_client import Client
@@ -847,22 +986,23 @@ Otherwise: normal genius chat."""
                     return str(res) if res else None
                 video_url = None
                 for attempt in range(5):
-                    await status.edit(content=f"🚀 Attempt {attempt+1}/5...")
+                    try: await status.edit(embed=info_embed(f"🚀 Attempt {attempt+1}/5..."))
+                    except: pass
                     try:
                         video_url = await asyncio.to_thread(gen)
                         if video_url: break
                     except Exception as e: print(f"Video try: {e}")
                     if attempt < 4:
-                        await status.edit(content=f"⚠️ Attempt {attempt+1}/5 failed.")
+                        try: await status.edit(embed=info_embed(f"⚠️ Attempt {attempt+1}/5 failed. Retrying..."))
+                        except: pass
                         await asyncio.sleep(15)
                 if not video_url: raise Exception("Queue maxed.")
-                await status.edit(content="✨ Complete!")
-                await message.reply(f"🎥 **{video_prompt}**\n{video_url}")
                 await status.delete()
+                await message.reply(f"🎥 **{video_prompt}**\n{video_url}")
             except Exception as e:
                 print(f"Video crash: {e}")
                 user_diamonds[user_id]["diamonds"] += 1
-                try: await status.edit(content="❌ GPUs slammed. (Diamond refunded 💎)")
+                try: await status.edit(embed=err_embed("GPUs slammed. (Diamond refunded 💎)"))
                 except: pass
             finally:
                 active_video_generations -= 1
@@ -900,8 +1040,9 @@ Otherwise: normal genius chat."""
                 print(f"Music: {e}"); await message.reply("Music crashed.")
             return
 
+        # Normal chat reply
         if len(reply) > 1950:
-            await message.reply("Bro that's an essay. Discord caps at 2000 chars.")
+            await message.reply(embed=err_embed("Response too long (2000 char limit)."))
         else:
             await message.reply(reply)
         chat_history[user_id].append({"role": "assistant", "content": response.choices[0].message.content})
@@ -912,9 +1053,9 @@ Otherwise: normal genius chat."""
             chat_history[user_id].pop()
         err = str(e).lower()
         if any(x in err for x in ["rate limit", "429", "capacity"]):
-            await message.reply("Servers spammed. Wait a min. 🛑")
+            await message.reply(embed=err_embed("Servers spammed. Wait a min."))
         else:
-            await message.reply("Core lagged. Try again.")
+            await message.reply(embed=err_embed("Core lagged. Try again."))
 
 # ==========================================
 # 🚀 ENTRY
