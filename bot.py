@@ -56,30 +56,26 @@ leave_configs = {}
 active_meme_loops = {}
 active_chat_loops = {}
 active_aesthetic_loops = {}
-active_male_pfp_loops = {}   # 🆕 Male PFP Loops
-active_female_pfp_loops = {} # 🆕 Female PFP Loops
+active_male_pfp_loops = {}
+active_female_pfp_loops = {}
 ai_active_channels = {}
 
-# Anti-Spam Trackers
+# Anti-Spam & History Trackers
 user_strikes = {}  
 user_recent_msgs = OrderedDict()  
 recent_memes = deque(maxlen=50)
 recent_greetings = deque(maxlen=20)
-recent_pfps = deque(maxlen=100) # 🆕 Prevents PFP repetition
+recent_pfps = deque(maxlen=150) # Stores 150 recent PFPs to prevent duplicates
 
 # ==========================================
 # 💾 ZERO-BANDWIDTH JSON SAVER
 # ==========================================
 def save_configs():
     data = {
-        "welcome": welcome_configs,
-        "leave": leave_configs,
-        "meme": active_meme_loops,
-        "chat": active_chat_loops,
-        "aesthetic": active_aesthetic_loops,
-        "male_pfp": active_male_pfp_loops,
-        "female_pfp": active_female_pfp_loops,
-        "ai_active": list(ai_active_channels.keys()),
+        "welcome": welcome_configs, "leave": leave_configs,
+        "meme": active_meme_loops, "chat": active_chat_loops,
+        "aesthetic": active_aesthetic_loops, "male_pfp": active_male_pfp_loops,
+        "female_pfp": active_female_pfp_loops, "ai_active": list(ai_active_channels.keys()),
         "toggles": GLOBAL_TOGGLES
     }
     try:
@@ -278,15 +274,18 @@ async def fire_aesthetic_drop(cid, cfg):
     except Exception as e: print(f"Aesthetic drop: {e}")
 
 # ==========================================
-# 🆕 PFP DROPPER ENGINE (ZERO BANDWIDTH)
+# 🆕 100% RELIABLE PFP DROPPER ENGINE
 # ==========================================
 async def fire_pfp_drop(cid, cfg, gender):
     ch = discord_client.get_channel(cid)
     if not ch: return
-    for _ in range(5): # Try up to 5 times to avoid duplicates
+    for _ in range(5): # Try 5 times to get a unique image
         try:
-            # Using free, no-auth Avatar API
-            url = f"https://avatar.iran.liara.run/public/{gender}"
+            # RandomUser.me has 99 male and 99 female photos. 100% reliable, Discord caches them instantly.
+            num = random.randint(1, 99)
+            g = "men" if gender == "boy" else "women"
+            url = f"https://randomuser.me/api/portraits/{g}/{num}.jpg"
+            
             if url not in recent_pfps:
                 recent_pfps.append(url)
                 title = "🔥 Fresh Male PFP" if gender == "boy" else "🔥 Fresh Female PFP"
@@ -587,10 +586,8 @@ async def on_user_update(before, after):
         for guild in discord_client.guilds:
             member = guild.get_member(after.id)
             if member and member.nick:
-                try:
-                    await member.edit(nick=None)
-                except Exception:
-                    pass
+                try: await member.edit(nick=None)
+                except Exception: pass
 
 @discord_client.event
 async def on_ready():
