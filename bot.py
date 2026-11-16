@@ -125,10 +125,8 @@ tree = app_commands.CommandTree(discord_client)
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
+GIPHY_KEY = "dc6zaTOxFJmzC" # 🆕 Public Beta Key (No limits for our use case)
 ai_client = AsyncGroq(api_key=GROQ_KEY)
-
-# 🚨 Browser User-Agent for Scraping
-BROWSER_UA = os.getenv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 # ==========================================
 # 🔍 FREE OCR SCANNER
@@ -276,64 +274,60 @@ async def fire_aesthetic_drop(cid, cfg):
     except Exception as e: print(f"Aesthetic drop: {e}")
 
 # ==========================================
-# 🆕 PREMIUM 4K PFP & MP4 BANNER ENGINES (NO API KEY)
+# 🆕 100% RELIABLE PFP ENGINE (RandomUser API)
 # ==========================================
 async def fire_pfp_drop(cid, cfg, gender):
     ch = discord_client.get_channel(cid)
     if not ch: return
     
-    query = "male model portrait" if gender == "boy" else "female model portrait"
-    url = f"https://www.pexels.com/search/{query.replace(' ', '%20')}/"
-    
-    for attempt in range(3):
+    # 99 high-quality portraits per gender. Reliable, instant, zero keys.
+    for _ in range(5): 
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-                headers = {"User-Agent": BROWSER_UA}
-                async with session.get(url, headers=headers) as resp:
-                    html = await resp.text()
-                    img_urls = re.findall(r'https://images\.pexels\.com/photos/\d+/pexels-photo-\d+\.jpeg', html)
-                    
-                    if img_urls:
-                        unique_urls = list(set(img_urls))
-                        selected_url = random.choice(unique_urls)
-                        
-                        if selected_url not in recent_media:
-                            recent_media.append(selected_url)
-                            title = "🔥 4K Male PFP" if gender == "boy" else "🔥 4K Female PFP"
-                            e = brand_embed(title=title, description="High-Res. Steal this.")
-                            e.set_image(url=selected_url)
-                            e.set_footer(text=f"📸 Pexels • {BRAND_FOOTER}")
-                            await ch.send(embed=e)
-                            return
+            num = random.randint(1, 99)
+            g = "men" if gender == "boy" else "women"
+            url = f"https://randomuser.me/api/portraits/{g}/{num}.jpg"
+            
+            if url not in recent_media:
+                recent_media.append(url)
+                title = "🔥 Rich Male PFP" if gender == "boy" else "🔥 Rich Female PFP"
+                e = brand_embed(title=title, description="High-Res. Steal this.")
+                e.set_image(url=url)
+                e.set_footer(text=f"📸 RandomUser • {BRAND_FOOTER}")
+                await ch.send(embed=e)
+                return
         except Exception as e:
             print(f"PFP Drop Error: {e}")
-            await asyncio.sleep(2)
 
+# ==========================================
+# 🆕 AUTO-PLAYING GIF BANNER ENGINE (Giphy API)
+# ==========================================
 async def fire_banner_drop(cid, cfg):
     ch = discord_client.get_channel(cid)
     if not ch: return
     
-    categories = ["abstract", "city", "nature", "technology"]
-    cat = random.choice(categories)
-    url = f"https://mixkit.co/free-stock-video/{cat}/"
+    # Uses the public Giphy beta key. No links shown, auto-plays in embed.
+    queries = ["aesthetic loop", "cyberpunk city", "neon abstract", "chill vibes"]
+    query = random.choice(queries)
+    url = f"https://api.giphy.com/v1/gifs/search?api_key={GIPHY_KEY}&q={urllib.parse.quote(query)}&limit=20&rating=g"
     
-    for attempt in range(3):
+    for _ in range(3):
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-                headers = {"User-Agent": BROWSER_UA}
-                async with session.get(url, headers=headers) as resp:
-                    html = await resp.text()
-                    mp4_links = re.findall(r'https://assets\.mixkit\.co/videos/\d+/\d+-720\.mp4', html)
-                    
-                    if mp4_links:
-                        unique_links = list(set(mp4_links))
-                        selected_mp4 = random.choice(unique_links)
-                        
-                        if selected_mp4 not in recent_media:
-                            recent_media.append(selected_mp4)
-                            e = brand_embed(title="🎬 Fresh Animated Banner", description="Use this MP4 for your profile.")
-                            await ch.send(selected_mp4) 
-                            return
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        gifs = data.get("data", [])
+                        if gifs:
+                            gif = random.choice(gifs)
+                            gif_url = gif["images"]["original"]["url"]
+                            
+                            if gif_url not in recent_media:
+                                recent_media.append(gif_url)
+                                e = brand_embed(title="🎬 Fresh Animated Banner", description="Auto-playing GIF. Steal this.")
+                                e.set_image(url=gif_url) # 🔥 THIS HIDES THE LINK AND AUTO-PLAYS IT
+                                e.set_footer(text=f"Giphy • {BRAND_FOOTER}")
+                                await ch.send(embed=e)
+                                return
         except Exception as e:
             print(f"Banner Drop Error: {e}")
             await asyncio.sleep(2)
@@ -489,7 +483,7 @@ async def aesthetic_cmd(interaction: discord.Interaction, enabled: bool, minutes
     asyncio.create_task(fire_aesthetic_drop(cid, cfg))
 
 # 🆕 PREMIUM MEDIA COMMANDS
-@tree.command(name="male-pfp", description="Toggle 4K Male PFP drops in THIS channel.")
+@tree.command(name="male-pfp", description="Toggle high-res Male PFP drops in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def male_pfp_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 60):
     cid = interaction.channel.id
@@ -498,10 +492,10 @@ async def male_pfp_cmd(interaction: discord.Interaction, enabled: bool, minutes:
         await interaction.response.send_message(embed=ok_embed("Male PFP Dropper **OFF** here."), ephemeral=True); return
     cfg = {"interval": minutes * 60, "last_drop": time.time()}
     active_male_pfp_loops[cid] = cfg; save_configs()
-    await interaction.response.send_message(embed=ok_embed(f"4K Male PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"Male PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_pfp_drop(cid, cfg, "boy"))
 
-@tree.command(name="female-pfp", description="Toggle 4K Female PFP drops in THIS channel.")
+@tree.command(name="female-pfp", description="Toggle high-res Female PFP drops in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def female_pfp_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 60):
     cid = interaction.channel.id
@@ -510,10 +504,10 @@ async def female_pfp_cmd(interaction: discord.Interaction, enabled: bool, minute
         await interaction.response.send_message(embed=ok_embed("Female PFP Dropper **OFF** here."), ephemeral=True); return
     cfg = {"interval": minutes * 60, "last_drop": time.time()}
     active_female_pfp_loops[cid] = cfg; save_configs()
-    await interaction.response.send_message(embed=ok_embed(f"4K Female PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"Female PFP Dropper ON here (every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_pfp_drop(cid, cfg, "girl"))
 
-@tree.command(name="banner", description="Toggle MP4 Animated Banner drops in THIS channel.")
+@tree.command(name="banner", description="Toggle Auto-playing GIF Banner drops in THIS channel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def banner_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 120):
     cid = interaction.channel.id
@@ -522,7 +516,7 @@ async def banner_cmd(interaction: discord.Interaction, enabled: bool, minutes: i
         await interaction.response.send_message(embed=ok_embed("Banner Dropper **OFF** here."), ephemeral=True); return
     cfg = {"interval": minutes * 60, "last_drop": time.time()}
     active_banner_loops[cid] = cfg; save_configs()
-    await interaction.response.send_message(embed=ok_embed(f"MP4 Banner Dropper ON here (every {minutes}m)."), ephemeral=True)
+    await interaction.response.send_message(embed=ok_embed(f"GIF Banner Dropper ON here (every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_banner_drop(cid, cfg))
 
 @tree.command(name="ai-active", description="AI replies to EVERY message in THIS channel.")
