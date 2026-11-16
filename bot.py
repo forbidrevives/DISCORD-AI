@@ -33,11 +33,11 @@ def err_embed(msg): return brand_embed(description=f"❌ {msg}", color=ERROR_COL
 def info_embed(msg): return brand_embed(description=f"ℹ️ {msg}")
 
 # ==========================================
-# 🎵 BANDWIDTH-SAFE AUDIO
+# 🎵 BANDWIDTH-SAFE AUDIO (Buffered)
 # ==========================================
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -vn',
-    'options': '-vn -loglevel quiet -t 180 -b:a 64k'
+    'options': '-vn -loglevel quiet -t 180 -b:a 64k -bufsize 512k'
 }
 YDL_OPTIONS = {
     'format': 'bestaudio[abr<=64]/bestaudio/best',
@@ -151,7 +151,7 @@ def music_allowed(user_id):
     return True, ""
 
 # ==========================================
-# 🚨 ADVANCED ANTI-SPAM
+# 🚨 ADVANCED ANTI-SPAM (10 msg / 10s)
 # ==========================================
 def apply_strike(user_id):
     now = time.time()
@@ -185,7 +185,7 @@ def check_spam(user_id, content, is_ping):
     return False, 0
 
 # ==========================================
-# 🎨 GREETING BUILDER
+# 🎨 GREETING BUILDER (Embeds)
 # ==========================================
 async def build_greeting(member, cfg, kind="welcome"):
     for attempt in range(3):
@@ -272,23 +272,39 @@ async def fire_aesthetic_drop(cid, cfg):
     except Exception as e: print(f"Aesthetic drop: {e}")
 
 # ==========================================
-# 🎵 MUSIC PLAYER HELPER
+# 🎵 MUSIC PLAYER HELPER (Robust & Fallback)
 # ==========================================
 async def play_music(vc, query, user_id):
     ok, reason = music_allowed(user_id)
     if not ok: return False, reason
     
+    # 1. Clean the query (in case AI duplicates it)
+    query = query.split("[")[0].strip()
+    
     try:
-        info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(YDL_OPTIONS).extract_info(f"scsearch:{query}", download=False))
+        # 2. Search YouTube, if fails, fallback to SoundCloud
+        try:
+            info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(YDL_OPTIONS).extract_info(f"ytsearch:{query}", download=False))
+        except Exception:
+            info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(YDL_OPTIONS).extract_info(f"scsearch:{query}", download=False))
+            
         if info.get('entries'):
-            url = info['entries'][0]['url']; title = info['entries'][0]['title']
+            url = info['entries'][0]['url']
+            title = info['entries'][0]['title']
             if vc.is_playing(): vc.stop()
-            vc.play(discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS))
+            
+            # 3. Added error logger for FFmpeg
+            def after_song(error):
+                if error: print(f"FFmpeg playback error: {error}")
+                
+            vc.play(discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS), after=after_song)
             user_music_last[user_id] = time.time(); daily_song_count[0] += 1
             return True, f"🎶 **Playing (3 min max):** {title}"
-        else: return False, "Couldn't find it."
+        else:
+            return False, "Couldn't find that song."
     except Exception as e:
-        print(f"Music: {e}"); return False, "Music crashed."
+        print(f"Music crash: {e}")
+        return False, "Music engine crashed. Check if FFmpeg is installed on Render."
 
 # ==========================================
 # 🛠️ UTILITY & MUSIC COMMANDS
@@ -488,7 +504,7 @@ async def status_cmd(interaction: discord.Interaction):
 async def help_cmd(interaction: discord.Interaction):
     e = brand_embed(title="📖 TZAR ™ COMMAND PANEL", description="🔒 *Admin only. Run in the channel you want to affect.*")
     
-    # 3-Column Mobile-Friendly Layout
+    # Perfectly aligned 3-column layout for mobile
     e.add_field(name="🎉 Greetings", value="`/welcome enabled:`\n`/leave enabled:`", inline=True)
     e.add_field(name="🔁 Loops", value="`/chat-revive enabled:`\n`/meme enabled:`\n`/aesthetic enabled:`\n`/ai-auto enabled:`", inline=True)
     e.add_field(name="🛑 Stop", value="`/stop kind:`\n\n\n", inline=True)
@@ -582,7 +598,7 @@ async def on_ready():
             except: pass
 
 # ==========================================
-# 👋 JOIN / LEAVE (FULLY SEPARATED)
+# 👋 JOIN / LEAVE (Isolated correctly)
 # ==========================================
 @discord_client.event
 async def on_member_join(member):
@@ -591,17 +607,17 @@ async def on_member_join(member):
         except: pass
     await asyncio.sleep(3)
     
-    # 1. Standard beautiful embed in configured welcome channels
+    # 1. Embed Welcome (for channels where /welcome is enabled)
     for cid, cfg in list(welcome_configs.items()):
         ch = discord_client.get_channel(cid)
         if ch: await send_greeting(ch, member, cfg, "welcome")
 
-    # 2. AI ping & question in configured chat-revive channels
+    # 2. AI Plain Text Ping (ONLY for channels where /chat-revive is enabled)
     for cid, cfg in list(active_chat_loops.items()):
         ch = discord_client.get_channel(cid)
         if ch:
             try:
-                prompt = f"User {member.name} just joined the server. Welcome them in a chill, gamer bro way. You MUST ask them a fun question to get them talking. Max 15 words. Use {member.mention} to ping them."
+                prompt = f"User {member.name} just joined the server. Welcome them in a chill, gamer bro way. You MUST ask them a fun question to get them talking. Max 15 words. Use exactly {member.mention} to ping them. Output ONLY the plain message text, no markdown."
                 res = await ai_client.chat.completions.create(messages=[{"role": "user", "content": prompt}], model="openai/gpt-oss-20b")
                 msg = res.choices[0].message.content.strip()
                 await ch.send(msg)
@@ -806,7 +822,7 @@ Otherwise: normal genius chat."""
             if vc: vc.stop(); await vc.disconnect(force=True); await message.reply("Peace ✌️")
             return
         if "[PLAY]" in reply:
-            song = reply.split("[PLAY]")[1].strip()
+            song = reply.split("[PLAY]")[1].split("[")[0].strip()
             if not message.author.voice: await message.reply("Join a VC first!"); return
             vc = message.guild.voice_client or await message.author.voice.channel.connect(self_deaf=True)
             success, msg = await play_music(vc, song, user_id)
