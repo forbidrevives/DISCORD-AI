@@ -11,6 +11,7 @@ import aiohttp
 import random
 import time
 import hashlib
+import json
 from collections import OrderedDict, deque
 
 # ==========================================
@@ -20,6 +21,7 @@ BRAND_COLOR = 0x2b2d31
 SUCCESS_COLOR = 0x2ecc71
 ERROR_COLOR = 0xe74c3c
 BRAND_FOOTER = "F0RB1D • TZAR NETWORK"
+CONFIG_FILE = "tzar_configs.json"
 
 def brand_embed(title=None, description=None, color=BRAND_COLOR):
     e = discord.Embed(title=title, description=description, color=color)
@@ -32,13 +34,12 @@ def err_embed(msg): return brand_embed(description=f"❌ {msg}", color=ERROR_COL
 def info_embed(msg): return brand_embed(description=f"ℹ️ {msg}")
 
 # ==========================================
-# 🛡️ GLOBAL STATE & LIMITS
+# 🛡️ GLOBAL STATE & MEMORY (ZERO BLOAT)
 # ==========================================
 MAX_HISTORY = 6
 MAX_TRACKED_USERS = 500
 AI_CALL_WINDOW = 60
 GLOBAL_AI_LIMIT = 30
-MAX_CONCURRENT_VIDEOS = 2 # Kept just in case, though video is removed
 
 runtime_settings = {"cooldown": 4, "ai_limit": 5}
 GLOBAL_TOGGLES = {"clan_mode": True, "ai_chat": True}
@@ -49,7 +50,7 @@ user_spam_warned = OrderedDict()
 user_ai_calls = OrderedDict()
 global_ai_calls = deque()
 
-# Dynamic Configs
+# Dynamic Configs (Saved to JSON)
 welcome_configs = {}
 leave_configs = {}
 active_meme_loops = {}
@@ -78,6 +79,42 @@ def make_op_name(member):
     return f"σρ ⁝ {styled} ™"[:32]
 
 # ==========================================
+# 💾 ZERO-BANDWIDTH JSON SAVER
+# ==========================================
+def save_configs():
+    data = {
+        "welcome": welcome_configs,
+        "leave": leave_configs,
+        "meme": active_meme_loops,
+        "chat": active_chat_loops,
+        "aesthetic": active_aesthetic_loops,
+        "ai_active": list(ai_active_channels.keys()),
+        "toggles": GLOBAL_TOGGLES
+    }
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"Save Config Error: {e}")
+
+def load_configs():
+    global welcome_configs, leave_configs, active_meme_loops, active_chat_loops, active_aesthetic_loops, ai_active_channels, GLOBAL_TOGGLES
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                data = json.load(f)
+                welcome_configs = {int(k): v for k, v in data.get("welcome", {}).items()}
+                leave_configs = {int(k): v for k, v in data.get("leave", {}).items()}
+                active_meme_loops = {int(k): v for k, v in data.get("meme", {}).items()}
+                active_chat_loops = {int(k): v for k, v in data.get("chat", {}).items()}
+                active_aesthetic_loops = {int(k): v for k, v in data.get("aesthetic", {}).items()}
+                ai_active_channels = {int(k): True for k in data.get("ai_active", [])}
+                GLOBAL_TOGGLES.update(data.get("toggles", {}))
+                print("✅ Configurations loaded from JSON.")
+        except Exception as e:
+            print(f"Load Config Error: {e}")
+
+# ==========================================
 # 🌐 KEEP-ALIVE (For Render)
 # ==========================================
 flask_app = Flask('')
@@ -102,7 +139,7 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 ai_client = AsyncGroq(api_key=GROQ_KEY)
 
 # ==========================================
-# 🔍 FREE OCR SCANNER (Zero Bandwidth)
+# 🔍 FREE OCR SCANNER
 # ==========================================
 async def scan_image_text(image_url):
     try:
@@ -155,20 +192,16 @@ def check_spam(user_id, content, is_ping):
     user_recent_msgs[user_id].append((now, content_hash, is_ping))
     recent = [m for m in user_recent_msgs[user_id] if now - m[0] < 10]
     if not recent: return False, 0
-    
-    # 10 messages in 10 seconds
     if len(recent) >= 10: return True, apply_strike(user_id)
-    # 5 identical messages
     text_counts = {}
     for _, c_hash, _ in recent: text_counts[c_hash] = text_counts.get(c_hash, 0) + 1
     if any(count >= 5 for c_hash, count in text_counts.items() if c_hash != "empty"): return True, apply_strike(user_id)
-    # 5 pings
     ping_count = sum(1 for _, _, ping in recent if ping)
     if ping_count >= 5: return True, apply_strike(user_id)
     return False, 0
 
 # ==========================================
-# 🎨 GREETING & BACKGROUND LOOPS
+# 🎨 GREETINGS & BACKGROUND LOOPS
 # ==========================================
 async def build_greeting(member, cfg, kind="welcome"):
     for attempt in range(3):
@@ -256,14 +289,10 @@ async def fire_aesthetic_drop(cid, cfg):
 # ==========================================
 @tree.command(name="setup", description="Shows you how to setup the bot in your server.")
 async def setup_cmd(interaction: discord.Interaction):
-    e = brand_embed(
-        title="🛠️ TZAR Bot Setup Guide",
-        description="Everything is **Channel-Scoped**. Just run the command in the channel you want it to affect!"
-    )
-    e.add_field(name="1️⃣ Welcome & Leave", value="Go to `#welcome` and type:\n`/welcome enabled:True`\n\nGo to `#leave` and type:\n`/leave enabled:True`", inline=False)
-    e.add_field(name="2️⃣ Chat & Memes", value="Go to `#chat` and type:\n`/chat-revive enabled:True`\n\nGo to `#memes` and type:\n`/meme enabled:True minutes:30`", inline=False)
-    e.add_field(name="3️⃣ AI Chat", value="The AI responds to pings everywhere. If you want it to reply to *every* message in a channel (like `#ai`), type:\n`/ai-active enabled:True`", inline=False)
-    e.add_field(name="ℹ️ Info", value="Use `/help` to see all commands.\nNeed to stop something? Type `/stop` in that channel.", inline=False)
+    e = brand_embed(title="🛠️ TZAR Bot Setup Guide", description="Everything is **Channel-Scoped**. Just run the command in the channel you want it to affect!")
+    e.add_field(name="1️⃣ Welcome & Leave", value="`/welcome enabled:True`\n`/leave enabled:True`", inline=False)
+    e.add_field(name="2️⃣ Chat & Memes", value="`/chat-revive enabled:True`\n`/meme enabled:True minutes:30`", inline=False)
+    e.add_field(name="3️⃣ AI Chat", value="Pings work everywhere. For auto-reply in a channel:\n`/ai-active enabled:True`", inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @tree.command(name="help", description="Show all commands.")
@@ -307,7 +336,7 @@ async def dm_all_cmd(interaction: discord.Interaction, text: str = None, file: d
             if file_bytes: await member.send(content=text, file=discord.File(fp=discord.utils.io.BytesIO(file_bytes), filename=file_name))
             else: await member.send(content=text)
             success += 1
-            await asyncio.sleep(1.5) # Delay to prevent API ban
+            await asyncio.sleep(1.5)
         except discord.Forbidden: failed += 1
         except Exception as e: failed += 1; print(f"DM failed: {e}")
     await interaction.followup.send(embed=ok_embed(f"📨 **Broadcast Complete!**\n✅ Sent: {success}\n❌ Failed: {failed}"), ephemeral=True)
@@ -320,9 +349,9 @@ async def dm_all_cmd(interaction: discord.Interaction, text: str = None, file: d
 async def welcome_cmd(interaction: discord.Interaction, enabled: bool, template: str = None, gif_url: str = None):
     cid = interaction.channel.id
     if not enabled:
-        welcome_configs.pop(cid, None)
+        welcome_configs.pop(cid, None); save_configs()
         await interaction.response.send_message(embed=ok_embed("Welcome **OFF** here."), ephemeral=True); return
-    welcome_configs[cid] = {"template": template, "gif_url": gif_url}
+    welcome_configs[cid] = {"template": template, "gif_url": gif_url}; save_configs()
     await interaction.response.send_message(embed=ok_embed(f"Welcome **ON** here.\n*Placeholders: `{{user}}` `{{name}}` `{{server}}`*"), ephemeral=True)
 
 @tree.command(name="leave", description="Toggle leave messages in THIS channel.")
@@ -330,9 +359,9 @@ async def welcome_cmd(interaction: discord.Interaction, enabled: bool, template:
 async def leave_cmd(interaction: discord.Interaction, enabled: bool, template: str = None, gif_url: str = None):
     cid = interaction.channel.id
     if not enabled:
-        leave_configs.pop(cid, None)
+        leave_configs.pop(cid, None); save_configs()
         await interaction.response.send_message(embed=ok_embed("Leave **OFF** here."), ephemeral=True); return
-    leave_configs[cid] = {"template": template, "gif_url": gif_url}
+    leave_configs[cid] = {"template": template, "gif_url": gif_url}; save_configs()
     await interaction.response.send_message(embed=ok_embed(f"Leave **ON** here.\n*Placeholders: `{{user}}` `{{name}}` `{{server}}`*"), ephemeral=True)
 
 @tree.command(name="chat-revive", description="Toggle AI chat reviver in THIS channel.")
@@ -345,11 +374,11 @@ async def leave_cmd(interaction: discord.Interaction, enabled: bool, template: s
 async def chat_revive_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 120, ping_mode: str = "never"):
     cid = interaction.channel.id
     if not enabled:
-        active_chat_loops.pop(cid, None)
+        active_chat_loops.pop(cid, None); save_configs()
         await interaction.response.send_message(embed=ok_embed("Chat Reviver **OFF** here."), ephemeral=True); return
     if minutes < 1: await interaction.response.send_message(embed=err_embed("Minimum 1 minute."), ephemeral=True); return
     cfg = {"interval": minutes * 60, "last_drop": time.time(), "ping_mode": ping_mode}
-    active_chat_loops[cid] = cfg
+    active_chat_loops[cid] = cfg; save_configs()
     mode_emoji = {"never": "🔕", "always": "📢", "random": "🎲"}[ping_mode]
     await interaction.response.send_message(embed=ok_embed(f"Chat Reviver ON here (every {minutes}m, ping: {mode_emoji}).\n*🎭 Bot will react & welcome new joins here.*"), ephemeral=True)
     asyncio.create_task(fire_chat_drop(cid, cfg))
@@ -359,10 +388,10 @@ async def chat_revive_cmd(interaction: discord.Interaction, enabled: bool, minut
 async def meme_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 30):
     cid = interaction.channel.id
     if not enabled:
-        active_meme_loops.pop(cid, None)
+        active_meme_loops.pop(cid, None); save_configs()
         await interaction.response.send_message(embed=ok_embed("Meme Dropper **OFF** here."), ephemeral=True); return
     cfg = {"interval": minutes * 60, "last_drop": time.time()}
-    active_meme_loops[cid] = cfg
+    active_meme_loops[cid] = cfg; save_configs()
     await interaction.response.send_message(embed=ok_embed(f"Meme Dropper ON here (every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_meme_drop(cid, cfg))
 
@@ -371,10 +400,10 @@ async def meme_cmd(interaction: discord.Interaction, enabled: bool, minutes: int
 async def aesthetic_cmd(interaction: discord.Interaction, enabled: bool, minutes: int = 180, query: str = "aesthetic", landscape: bool = False):
     cid = interaction.channel.id
     if not enabled:
-        active_aesthetic_loops.pop(cid, None)
+        active_aesthetic_loops.pop(cid, None); save_configs()
         await interaction.response.send_message(embed=ok_embed("Aesthetic **OFF** here."), ephemeral=True); return
     cfg = {"interval": minutes * 60, "last_drop": time.time(), "query": query, "landscape": landscape}
-    active_aesthetic_loops[cid] = cfg
+    active_aesthetic_loops[cid] = cfg; save_configs()
     await interaction.response.send_message(embed=ok_embed(f"Aesthetic ON here ('{query}', every {minutes}m)."), ephemeral=True)
     asyncio.create_task(fire_aesthetic_drop(cid, cfg))
 
@@ -383,10 +412,10 @@ async def aesthetic_cmd(interaction: discord.Interaction, enabled: bool, minutes
 async def ai_active_cmd(interaction: discord.Interaction, enabled: bool):
     cid = interaction.channel.id
     if enabled:
-        ai_active_channels[cid] = True
+        ai_active_channels[cid] = True; save_configs()
         await interaction.response.send_message(embed=ok_embed(f"🤖 AI will reply to **every message** here."), ephemeral=True)
     else:
-        ai_active_channels.pop(cid, None)
+        ai_active_channels.pop(cid, None); save_configs()
         await interaction.response.send_message(embed=ok_embed("AI active-reply disabled here."), ephemeral=True)
 
 @tree.command(name="stop", description="Stop something in THIS channel.")
@@ -406,22 +435,29 @@ async def stop_cmd(interaction: discord.Interaction, kind: app_commands.Choice[s
     if kind.value in ("chat", "all") and active_chat_loops.pop(cid, None): stopped.append("chat")
     if kind.value in ("meme", "all") and active_meme_loops.pop(cid, None): stopped.append("meme")
     if kind.value in ("aesthetic", "all") and active_aesthetic_loops.pop(cid, None): stopped.append("aesthetic")
-    if kind.value in ("ai_active", "all") and ai_active_channels.pop(cid, None): stopped.append("ai-active")
+    
+    # ✅ THE FIX APPLIED HERE
+    if kind.value in ("ai_active", "all") and cid in ai_active_channels:
+        ai_active_channels.pop(cid)
+        stopped.append("ai-active")
+        
     if kind.value in ("welcome", "all") and welcome_configs.pop(cid, None): stopped.append("welcome")
     if kind.value in ("leave", "all") and leave_configs.pop(cid, None): stopped.append("leave")
+    
+    save_configs()
     if stopped: await interaction.response.send_message(embed=ok_embed(f"Stopped: **{', '.join(stopped)}**"), ephemeral=True)
     else: await interaction.response.send_message(embed=info_embed(f"Nothing running here."), ephemeral=True)
 
 @tree.command(name="clan-mode", description="Toggle OP auto-rename globally.")
 @app_commands.checks.has_permissions(administrator=True)
 async def clan_mode_cmd(interaction: discord.Interaction, enabled: bool):
-    GLOBAL_TOGGLES["clan_mode"] = enabled
+    GLOBAL_TOGGLES["clan_mode"] = enabled; save_configs()
     await interaction.response.send_message(embed=ok_embed(f"Clan Mode: **{'ON' if enabled else 'OFF'}**"), ephemeral=True)
 
 @tree.command(name="ai-global", description="Toggle AI chat replies globally.")
 @app_commands.checks.has_permissions(administrator=True)
 async def ai_global_cmd(interaction: discord.Interaction, enabled: bool):
-    GLOBAL_TOGGLES["ai_chat"] = enabled
+    GLOBAL_TOGGLES["ai_chat"] = enabled; save_configs()
     await interaction.response.send_message(embed=ok_embed(f"Global AI Chat: **{'ON' if enabled else 'OFF'}**"), ephemeral=True)
 
 @tree.command(name="cooldown", description="Set per-user message cooldown (seconds).")
@@ -495,6 +531,7 @@ async def before_loops():
 @discord_client.event
 async def on_ready():
     print(f'🔥 WE LIVE! {discord_client.user}')
+    load_configs()  # LOADS SAVED SETTINGS ON BOOT
     try:
         synced = await tree.sync()
         print(f"🌍 Synced {len(synced)} slash commands!")
@@ -503,7 +540,7 @@ async def on_ready():
         if not loop.is_running(): loop.start()
 
 # ==========================================
-# 👋 JOIN / LEAVE
+# 👋 JOIN / LEAVE (NO MORE DOUBLE FIRE)
 # ==========================================
 @discord_client.event
 async def on_member_join(member):
@@ -512,11 +549,18 @@ async def on_member_join(member):
         except: pass
     await asyncio.sleep(3)
     
+    handled_channels = set()
+    
+    # 1. Send Embed
     for cid, cfg in list(welcome_configs.items()):
         ch = discord_client.get_channel(cid)
-        if ch: await send_greeting(ch, member, cfg, "welcome")
+        if ch:
+            await send_greeting(ch, member, cfg, "welcome")
+            handled_channels.add(cid)
 
+    # 2. Send AI Ping (Skip if already sent embed above)
     for cid, cfg in list(active_chat_loops.items()):
+        if cid in handled_channels: continue 
         ch = discord_client.get_channel(cid)
         if ch:
             try:
@@ -535,7 +579,7 @@ async def on_member_remove(member):
         if ch: await send_greeting(ch, member, cfg, "leave")
 
 # ==========================================
-# 💬 MESSAGE HANDLER (Omni-Intelligent Core)
+# 💬 MESSAGE HANDLER (Pure AI & Zero-Bloat)
 # ==========================================
 @discord_client.event
 async def on_message(message):
