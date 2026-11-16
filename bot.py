@@ -42,7 +42,6 @@ AI_CALL_WINDOW = 60
 GLOBAL_AI_LIMIT = 30
 
 runtime_settings = {"cooldown": 4, "ai_limit": 5}
-# RENAMING SYSTEM IS COMPLETELY REMOVED
 GLOBAL_TOGGLES = {"ai_chat": True}
 
 chat_history = {}
@@ -329,30 +328,32 @@ async def dm_all_cmd(interaction: discord.Interaction, text: str = None, file: d
     await interaction.followup.send(embed=ok_embed(f"📨 **Broadcast Complete!**\n✅ Sent: {success}\n❌ Failed: {failed}"), ephemeral=True)
 
 # ==========================================
-# 🚨 MANUAL REVERT COMMAND
+# 🚨 FAST MANUAL REVERT COMMAND
 # ==========================================
-@tree.command(name="revert", description="Remove aesthetic nicknames and reset to default Discord names.")
+@tree.command(name="revert", description="Remove custom nicknames so everyone shows their global Display Name.")
 @app_commands.checks.has_permissions(administrator=True)
 async def revert_cmd(interaction: discord.Interaction, confirm: bool):
     if not confirm:
         await interaction.response.send_message(embed=info_embed("Command cancelled. (Set `confirm` to True to run)."), ephemeral=True); return
 
-    await interaction.response.send_message(embed=info_embed("🔄 Scanning and reverting nicknames... (This takes a moment)"), ephemeral=True)
-    count = 0
-    for member in interaction.guild.members:
-        if member.bot: continue
-        # Check for old aesthetic tags
-        if member.nick and ("σρ ⁝" in member.nick or "™" in member.nick or "мαƒια χ" in member.nick):
+    await interaction.response.send_message(embed=info_embed("🔄 Stripping nicknames and resetting to Display Names..."), ephemeral=True)
+    
+    async def clear_nick(member):
+        if member.bot: return 0
+        if member.nick: # If they have a server nickname
             try:
-                await member.edit(nick=None) # Resets to global name
-                count += 1
-                await asyncio.sleep(1.2) # Rate limit protection
-            except discord.Forbidden:
-                pass
-            except Exception as e:
-                print(f"Revert error for {member.name}: {e}")
+                await member.edit(nick=None) # Resets to global display name
+                await asyncio.sleep(0.3) # Minimum safe delay for Discord API
+                return 1
+            except Exception:
+                return 0
+        return 0
+
+    # Run in parallel for speed, but with a safe rate limit
+    results = await asyncio.gather(*(clear_nick(m) for m in interaction.guild.members))
+    count = sum(results)
                 
-    await interaction.followup.send(embed=ok_embed(f"✅ **Done!** Reverted **{count}** members back to their original global names."), ephemeral=True)
+    await interaction.followup.send(embed=ok_embed(f"✅ **Done!** Cleared nicknames for **{count}** members."), ephemeral=True)
 
 # ==========================================
 # ⚙️ CHANNEL-SCOPED SETUPS
@@ -511,16 +512,29 @@ async def master_tickers():
             asyncio.create_task(fire_aesthetic_drop(cid, cfg))
 
 # ==========================================
-# 🚀 BOOT
+# 🚀 BOOT & DISPLAY NAME AUTO-SYNC
 # ==========================================
 @master_tickers.before_loop
 async def before_loops():
     await discord_client.wait_until_ready()
 
 @discord_client.event
+async def on_user_update(before, after):
+    # 🚨 AUTO-SYNC DISPLAY NAME 🚨
+    if before.display_name != after.display_name:
+        for guild in discord_client.guilds:
+            member = guild.get_member(after.id)
+            # If they have a server nickname, reset it so their new global name shows
+            if member and member.nick:
+                try:
+                    await member.edit(nick=None)
+                except Exception:
+                    pass
+
+@discord_client.event
 async def on_ready():
     print(f'🔥 WE LIVE! {discord_client.user}')
-    load_configs()  # LOADS SAVED SETTINGS ON BOOT
+    load_configs()  
     try:
         synced = await tree.sync()
         print(f"🌍 Synced {len(synced)} slash commands!")
